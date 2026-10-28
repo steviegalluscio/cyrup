@@ -58,7 +58,7 @@ You need a stable Rust toolchain, 1.96 or newer. Nothing else: no Node, no Pytho
 alongside the binary.
 
 ```sh
-cargo install --git https://github.com/cyrup-ai/cyrup cyrup
+cargo install --locked --git https://github.com/cyrup-ai/cyrup cyrup
 ```
 
 The first build takes several minutes, because it compiles a WebAssembly runtime, a JavaScript
