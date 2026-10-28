@@ -136,7 +136,7 @@ the command palette.
 
 ## herdr
 
-Run cyrup inside [herdr](https://github.com/herdr) and the herdr sidebar shows which pane is
+Run cyrup inside [herdr](https://github.com/herdrdev/herdr) and the herdr sidebar shows which pane is
 blocked waiting on you: permission and MCP dialogs raise the signal, and it is released on exit so
 no phantom `working` row is left behind. An agent can open, drive, inspect and close inspector and
 project panes through seven tool verbs, and subagents can run on a herdr saved machine, with events
