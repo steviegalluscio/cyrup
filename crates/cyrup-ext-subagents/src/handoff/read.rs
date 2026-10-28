@@ -55,7 +55,7 @@ pub fn validate_manifest_identity(
         if let Some(bindings) = group.lane_bindings.as_ref() {
             let mut binding_task_indexes: HashSet<u32> = HashSet::new();
             for (binding_index, binding) in bindings.iter().enumerate() {
-                assert_binding_lane_key(binding, group_index, binding_index).map_err(&defect)?;
+                assert_binding_lane_key(binding, group_index, binding_index).map_err(defect)?;
                 if !binding_task_indexes.insert(binding.task_index) {
                     return Err(defect(ManifestDefect::DuplicateBindingTaskIndex {
                         group: group_index,
@@ -95,7 +95,7 @@ pub fn validate_manifest_identity(
 
         let mut task_indexes: HashSet<u32> = HashSet::new();
         for (child_index, child) in group.children.iter().enumerate() {
-            assert_child_lane_key(child, group_index, child_index).map_err(&defect)?;
+            assert_child_lane_key(child, group_index, child_index).map_err(defect)?;
             if !task_indexes.insert(child.task_index) {
                 return Err(defect(ManifestDefect::DuplicateChildTaskIndex {
                     group: group_index,

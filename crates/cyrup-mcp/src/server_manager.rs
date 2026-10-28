@@ -1023,7 +1023,7 @@ impl ServerConnection {
     pub fn increment_in_flight(&self) {
         let _ = self
             .in_flight
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
                 Some(count.saturating_add(1))
             });
     }
@@ -1033,7 +1033,7 @@ impl ServerConnection {
     pub fn decrement_in_flight(&self) {
         let _ = self
             .in_flight
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
                 Some(count.saturating_sub(1))
             });
     }
@@ -1042,7 +1042,7 @@ impl ServerConnection {
     pub fn raise_in_flight_to(&self, floor: u32) {
         let _ = self
             .in_flight
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
                 Some(count.max(floor))
             });
     }

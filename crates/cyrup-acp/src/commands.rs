@@ -903,7 +903,7 @@ impl RenameEcho {
     #[must_use]
     pub fn take(&self) -> bool {
         self.outstanding
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok()
     }
 }
@@ -927,7 +927,7 @@ impl Drop for RenameClaim<'_> {
             // rename, and going negative is not representable.
             let _ = echo
                 .outstanding
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
         }
     }
 }

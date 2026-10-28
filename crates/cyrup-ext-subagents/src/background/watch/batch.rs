@@ -646,7 +646,7 @@ impl CompletionSink for BatchingHostServicesCompletionSink {
     }
 
     fn end_pending_delivery(&self) {
-        let _ = self.shared.delivering_pending.fetch_update(
+        let _ = self.shared.delivering_pending.try_update(
             std::sync::atomic::Ordering::SeqCst,
             std::sync::atomic::Ordering::SeqCst,
             |count| count.checked_sub(1),
