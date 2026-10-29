@@ -2125,6 +2125,42 @@ impl SessionBuilder {
             }
             resolved_model = Some(virtual_model);
         }
+        // CFG-094 — one provider per session. Steps 3/3b resolve the launch model against a catalog
+        // COMPOSED from `models.json` (`resolve_model`'s `model_config.compose(...)`), which spans
+        // every provider the file declares, while the session still holds the single provider its
+        // launch picked. On a RESUME with no explicit `--provider`/`--model` that provider is the
+        // zero-model `UnconfiguredProvider`: `bootstrap::resolve_default_launch_model` deliberately
+        // resolves a default for FRESH targets only, because a resumed session's model comes from
+        // its own branch. So step 3 restores `acme/<saved id>` off the composed rows while the
+        // installed provider stays `unconfigured`, and the first request answers
+        // `no model '<id>' in provider catalog` (`ProviderStreamFn` falls back to that provider's
+        // first row, of which it has none).
+        //
+        // Install the model's owner here — the same step a cross-provider `/model` select performs
+        // (`AgentSession::install_owning_provider`), through the same resolver seam — so the
+        // ProviderSwap below starts on the provider that actually carries the restored row. A guest
+        // registration is a realized provider already (step 3b installs it when it owns a deferred
+        // `--model`), so it wins over the resolver. Nothing is installed for a VIRTUAL selection:
+        // providers never see a virtual model, and the routing step installs the routed owner per
+        // request. No resolver (an embedder's build) or a resolver that refuses the id leaves the
+        // launch provider in place, exactly as before — the session still opens, and `/model` can
+        // still repair it; failing the build would regress every embedder whose resolver knows only
+        // its own providers.
+        if let Some(model) = resolved_model.as_ref()
+            && !cyrup_provider::is_virtual_model(model)
+            && initial_provider.id().as_str() != model.provider.as_str()
+        {
+            let owner = guest_providers
+                .provider(model.provider.as_str())
+                .or_else(|| {
+                    self.provider_resolver
+                        .as_ref()
+                        .and_then(|resolver| resolver.resolve(model.provider.as_str()).ok())
+                });
+            if let Some(owner) = owner {
+                initial_provider = owner;
+            }
+        }
         // extendResourcesFromExtensions("startup") (Pi agent-session.ts:2109-2135): fold every
         // `resources_discover` handler's contributed skill/prompt/theme paths into the registry
         // BEFORE the skill pointers + system prompt are derived. An empty aggregate (no handlers, or

@@ -370,6 +370,96 @@ async fn an_embedders_provider_under_an_id_models_json_does_not_mention_is_store
     );
 }
 
+/// CFG-094 — resuming a session whose saved model lives in `models.json` under a provider the
+/// launch did not install.
+///
+/// With no `--provider`/`--model`, `bootstrap::resolve_default_launch_model` resolves a default for
+/// FRESH targets only, so a resume starts on the zero-model `UnconfiguredProvider`. Step 3 still
+/// restores the saved `acme/<id>` because it resolves against the catalog COMPOSED from
+/// `models.json` — every provider the file declares — so the session came up on the right
+/// `ModelRef` while the installed slot held a provider with no such row, and the first request
+/// answered `no model '<id>' in provider catalog` (`ProviderStreamFn` fell back to that provider's
+/// first row; it has none).
+///
+/// RED before the builder's owner-install step: `streamed_as` panicked with exactly that provider
+/// error, i.e. nothing reached a provider. GREEN after: the saved model's provider is resolved
+/// through the same `ProviderResolver` seam a cross-provider `/model` select uses and installed
+/// before the session's `ProviderSwap` is built.
+#[tokio::test]
+async fn resuming_a_models_json_model_installs_the_provider_that_owns_it() {
+    let fx = fixture();
+    const MODEL: &str = "Qwen3.8-Flash-Next GSQ-RCO IQ3_S";
+    write_models_json(
+        &fx,
+        serde_json::json!({ "acme": {
+            "baseUrl": "https://acme.test/v1",
+            "apiKey": "sk-acme",
+            "api": "openai-completions",
+            "models": [{ "id": MODEL, "name": "Qwen" }]
+        } }),
+    );
+
+    // A persisted branch that selected the `models.json` model.
+    let layout = cyrup_session::SessionLayout::new(fx.agent_dir.join("sessions"), fx.cwd.clone());
+    let mut manager = cyrup_session::SessionManager::create(
+        &fx.cwd,
+        &layout,
+        cyrup_session::NewSessionOpts::default(),
+    )
+    .unwrap();
+    manager
+        .append_model_change("acme".into(), MODEL.into())
+        .unwrap();
+    let file = manager.session_file().unwrap().to_path_buf();
+
+    // The launch provider is the zero-model placeholder, as `bootstrap` leaves it on a resume.
+    let requested = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&requested);
+    let owners_acme: Arc<dyn Provider> = Arc::new(FauxProvider::with_config(FauxConfig {
+        api: "openai-completions".into(),
+        provider: "acme".into(),
+        models: vec![FauxModelDefinition::new("acme-base")],
+        on_response: Some(Arc::new(move |_meta: &FauxResponseMeta, model: &Model| {
+            recorder.lock().unwrap().push(model.id.as_str().to_string());
+        })),
+        ..FauxConfig::default()
+    }));
+    let resolver = Arc::new(EmbeddersResolver {
+        provider: Arc::clone(&owners_acme),
+    });
+    let mut cfg = config(&fx);
+    cfg.target = crate::SessionTarget::Resume(file);
+    let session = SessionBuilder::new(
+        Arc::new(cyrup_provider::unconfigured::UnconfiguredProvider::new()) as Arc<dyn Provider>,
+        cfg,
+    )
+    .provider_resolver(resolver)
+    .build()
+    .await
+    .expect("session builds");
+
+    assert_eq!(
+        session.model(),
+        Some(ModelRef {
+            provider: "acme".into(),
+            api: Some("openai-completions".into()),
+            model: MODEL.into(),
+        }),
+        "the saved model is restored"
+    );
+    assert_eq!(
+        session.provider_swap().current().id().as_str(),
+        "acme",
+        "the provider that owns the restored row is installed, not the launch placeholder"
+    );
+    let row = session
+        .full_model_catalog()
+        .into_iter()
+        .find(|m| m.provider.as_str() == "acme" && m.id.as_str() == MODEL)
+        .unwrap_or_else(|| panic!("the restored row is listed: {MODEL}"));
+    assert_eq!(streamed_as(&session, &requested, &row).await, MODEL);
+}
+
 /// A resolver of the embedder's own: it does not resolve the built-ins, and hands back
 /// `provider` for its id.
 struct EmbeddersResolver {
