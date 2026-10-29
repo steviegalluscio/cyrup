@@ -65,36 +65,28 @@ directory is ignored, apart from its permission policy, which is still read but 
 `deny` and `ask` rules apply and its `allow` rules do not. If the run needs the project's settings,
 skills, extensions or `allow` rules, pass `--approve`. See [Tools and permissions](tools-and-permissions.md#project-trust).
 
-## Codemode in a headless run
+## Nested tool calls in a headless run
 
-The `codemode` tool, where the model writes one script that calls the other tools, is off by default.
-Switch it on for a run with `--tools read,bash,edit,write,codemode`, or with `"defaultTools":
-["+codemode"]` in the global `settings.json` (in a project's settings it needs `--approve`, as above).
-One thing turns it on without either: a permission policy file, which makes every tool it does not deny
-active. A repository that ships a `.cyrup/agent/cyrup-permissions.jsonc` therefore gives its CI runs
-`codemode`, `grep`, `find`, `ls`, `powershell` and `tool_search`, with or without `--approve`; keep
-`codemode` off with a `deny` rule or `--exclude-tools codemode`. Without `--approve` the policy's
-`allow` rules are not applied (see above), so a CI run that depends on them needs the flag.
-Four things differ from an interactive run; the page [Codemode](codemode.md) has the rest.
+An extension tool can call other tools while it runs (`execute_tool` in a guest, `ctx.executeTool` in
+a native; see [Writing an extension](../extensions/authoring.md)). Those nested calls are gated, recorded
+and reported like the calls the model makes itself, and four things differ from an interactive run:
 
-- **Approvals.** Every call a script makes passes the permission gate on its own. In `-p` and
-  `--mode json` there is nobody to ask, so a call whose rule is `ask` is blocked, and the script
+- **Approvals.** Every nested call passes the permission gate on its own. In `-p` and
+  `--mode json` there is nobody to ask, so a call whose rule is `ask` is blocked, and the calling tool
   receives the reason as an error: `Running bash command 'ls' requires approval, but no interactive UI
-  is available (from codemode script).` Give the tools a script needs an `allow` rule, or a `deny` rule
-  to take the tool out of the script's reach. `--mode rpc` is different: it asks the client, which gets
-  an `extension_ui_request` (a `select` whose title ends `(from codemode script)`) and decides the call
-  with its `extension_ui_response`, so an rpc embedder answers the dialog instead of writing `allow`
-  rules.
-- **A failed script is not a failed run.** `Script failed`, `Script timed out` and a script's own
-  error are tool results the model reads, so `-p` still exits `0` unless the final turn errored.
-- **Events.** In `--mode json` and `--mode rpc` the calls a script makes are `tool_execution_*`
-  events of their own, with the id `<codemode call id>/<n>` and the `codemode` call's id in
-  `parentToolCallId`. A consumer that counts tool calls should skip events that carry one.
-- **Temp files.** Output past `max_output_tokens` and every image a script shows are written to the
-  system temp directory as `pi-codemode-*` files, mode `0600`, and cyrup never removes them. So is the
-  output of each `tools.bash` call past the 2000 lines or 50KB the model sees (`cyrup-bash-*.log`),
-  though the script's own result for that call may be complete and name no file. On a CI runner, point
-  `TMPDIR` at a directory that is thrown away.
+  is available (from a nested call of tool 'orchestrator').` Give the tools a nested caller needs an
+  `allow` rule, or a `deny` rule to take the tool out of its reach. `--mode rpc` is different: it asks
+  the client, which gets an `extension_ui_request` (a `select` whose title ends
+  `(from a nested call of tool '<name>')`) and decides the call with its `extension_ui_response`, so
+  an rpc embedder answers the dialog instead of writing `allow` rules.
+- **A failed nested call is not a failed run.** The caller decides what to make of it, and what it
+  returns is a tool result the model reads, so `-p` still exits `0` unless the final turn errored.
+- **Events.** In `--mode json` and `--mode rpc` a nested call is a `tool_execution_*` event of its
+  own, with the id `<calling call id>/<n>` and the calling call's id in `parentToolCallId`. A consumer
+  that counts tool calls should skip events that carry one.
+- **Temp files.** The output of each `bash` call past the 2000 lines or 50KB the model sees is written
+  to the system temp directory as `cyrup-bash-*.log`, mode `0600`, and cyrup never removes them. On a
+  CI runner, point `TMPDIR` at a directory that is thrown away.
 
 ## Exit codes
 

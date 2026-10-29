@@ -268,11 +268,10 @@ async fn run() -> anyhow::Result<i32> {
     // (`normalize_process_argv`).
     let mut raw: Vec<String> = normalize_process_argv(std::env::args());
 
-    // The five internal, never-advertised subcommands — `__subagent-runner --config <path>`
+    // The four internal, never-advertised subcommands — `__subagent-runner --config <path>`
     // (arch-SA §2.2/§6.5), `__subagent-inspector --async-dir <dir> --run-id <id>` (VL-S6),
-    // `__intercom-broker` (cyrup-intercom-port.md §7.3),
-    // `__mcp-keyring-helper` (13f-mcp-credentials MCP-260) and `__codemode-sandbox` (one codemode
-    // script's isolate). All five MUST be recognized before ANY
+    // `__intercom-broker` (cyrup-intercom-port.md §7.3) and
+    // `__mcp-keyring-helper` (13f-mcp-credentials MCP-260). All four MUST be recognized before ANY
     // user-facing arg leniency/clap parsing and before the package/config pre-dispatch below, which
     // has no knowledge of them. `cyrup::predispatch` classifies; the naming + dispatch is here
     // because `set_process_name` is `unsafe` and cannot live in the library (SEAM-070: a distinct
@@ -309,14 +308,7 @@ async fn run() -> anyhow::Result<i32> {
             set_process_name("cyrup-mcp-keyring");
             return Ok(cyrup::mcp_keyring_helper_cmd::dispatch());
         }
-        // One codemode script's sandbox process. Stdout is the parent's frame pipe: nothing above
-        // this arm may have printed, and nothing below it runs. `PR_SET_NAME` keeps `cyrup-sandbox`
-        // whole (13 bytes), so `ps -o comm=` shows which cyrup process is a script's.
-        Some(Internal::CodemodeSandbox) => {
-            set_process_name("cyrup-sandbox");
-            return Ok(cyrup::codemode_sandbox_cmd::dispatch().await);
-        }
-        // ACP-001 — the `--terminal-login` gate. Unlike the five above it does NOT end the
+        // ACP-001 — the `--terminal-login` gate. Unlike the four above it does NOT end the
         // process: an ACP client's Authenticate button appends `AuthMethod.args` to the agent
         // command it already holds, so this argv is `cyrup --acp … --terminal-login`, and the job
         // is to become an ordinary interactive `cyrup` the user can type `/login` into.

@@ -844,8 +844,9 @@ fn tui_mode_degrades_to_fullscreen_and_only_regular_opts_out() {
 ///
 /// `resolveDefaultTools` (Pi `core/settings-manager.ts:236-249` @v1.0.0): plain names replace
 /// `DEFAULT_TOOL_NAMES`, then each `+name`/`-name` applies in list order. `docs/settings.md:50`'s
-/// own worked example is `"defaultTools": ["+codemode"]`, which before this port selected a tool
-/// literally named `+codemode`, matched nothing, and left the session with no built-ins at all.
+/// own worked example is `"defaultTools": ["+tool_search"]` (pi names its `codemode` tool there,
+/// which this fork does not ship), which before this port selected a tool literally named
+/// `+tool_search`, matched nothing, and left the session with no built-ins at all.
 ///
 /// The `:238` condition — `plain.length > 0 || entries.length === 0 ? plain : [...DEFAULT_TOOL_NAMES]`
 /// — is the subtle one: `[]` stays empty (all built-ins off, a configured value), while a
@@ -861,8 +862,8 @@ fn default_tools_resolves_the_baseline_and_the_plus_minus_modifiers() {
 
     // pi's own documented example: one tool ADDED to the four defaults.
     assert_eq!(
-        tools(r#"{"defaultTools":["+codemode"]}"#),
-        names(&["read", "bash", "edit", "write", "codemode"])
+        tools(r#"{"defaultTools":["+tool_search"]}"#),
+        names(&["read", "bash", "edit", "write", "tool_search"])
     );
 
     // Plain names still replace the baseline outright.
@@ -880,8 +881,8 @@ fn default_tools_resolves_the_baseline_and_the_plus_minus_modifiers() {
     // Upstream's own two cases from `test/settings-manager.test.ts`'s "applies +name and -name to
     // the default selection".
     assert_eq!(
-        tools(r#"{"defaultTools":["+codemode","-write"]}"#),
-        names(&["read", "bash", "edit", "codemode"])
+        tools(r#"{"defaultTools":["+tool_search","-write"]}"#),
+        names(&["read", "bash", "edit", "tool_search"])
     );
     assert_eq!(
         tools(r#"{"defaultTools":["read","+grep","+read"]}"#),
@@ -1051,11 +1052,11 @@ fn project_modifiers_layer_onto_the_global_default_tools_through_the_manager() {
     let store = Arc::new(InMemorySettingsStore::new());
     store.seed(
         SettingsScope::Global,
-        r#"{ "defaultTools": ["read", "bash", "+codemode"] }"#,
+        r#"{ "defaultTools": ["read", "bash", "+web_fetch"] }"#,
     );
     store.seed(
         SettingsScope::Project,
-        r#"{ "defaultTools": ["-codemode", "+tool_search"] }"#,
+        r#"{ "defaultTools": ["-web_fetch", "+tool_search"] }"#,
     );
     let mut mgr = SettingsManager::load(store.clone(), true);
     assert_eq!(
@@ -1065,23 +1066,23 @@ fn project_modifiers_layer_onto_the_global_default_tools_through_the_manager() {
 
     // `applyOverrides` is `deepMergeSettings(this.settings, overrides)` (`:637`), so a
     // modifier-only override layers again rather than replacing.
-    mgr.apply_overrides(&Settings::parse(r#"{ "defaultTools": ["+codemode"] }"#).unwrap());
+    mgr.apply_overrides(&Settings::parse(r#"{ "defaultTools": ["+web_fetch"] }"#).unwrap());
     assert_eq!(
         mgr.effective().default_tools(),
-        names(&["read", "bash", "tool_search", "codemode"])
+        names(&["read", "bash", "tool_search", "web_fetch"])
     );
 
     // "applies project modifiers to the built-in defaults without a global setting".
     let bare = Arc::new(InMemorySettingsStore::new());
     bare.seed(
         SettingsScope::Project,
-        r#"{ "defaultTools": ["+codemode"] }"#,
+        r#"{ "defaultTools": ["+tool_search"] }"#,
     );
     assert_eq!(
         SettingsManager::load(bare, true)
             .effective()
             .default_tools(),
-        names(&["read", "bash", "edit", "write", "codemode"])
+        names(&["read", "bash", "edit", "write", "tool_search"])
     );
 
     // Upstream's "loads global defaults and lets project settings replace them": a plain project
@@ -1097,68 +1098,6 @@ fn project_modifiers_layer_onto_the_global_default_tools_through_the_manager() {
             .effective()
             .default_tools(),
         names(&["grep"])
-    );
-}
-
-/// `codemode.mode` / `codemode.inlineBudget` (pi `readMode`/`readInlineBudget`,
-/// `extensions/codemode/index.ts:22-29` @v1.0.1): `mode === "only" ? "only" : "on"`, and a budget is
-/// used only when it is a finite number `>= 0`, otherwise the tool's 3000-token default applies.
-#[test]
-fn codemode_settings_validate_like_the_extension_reads_them() {
-    let eff = |json: &str| EffectiveSettings::from_settings(Settings::parse(json).unwrap());
-
-    let unset = eff("{}");
-    assert_eq!(unset.codemode_mode(), CodemodeMode::On);
-    assert_eq!(unset.codemode_inline_budget(), 3000.0);
-    assert_eq!(unset.codemode(), CodemodeSettings::default());
-
-    assert_eq!(
-        eff(r#"{"codemode":{"mode":"only"}}"#).codemode_mode(),
-        CodemodeMode::Only
-    );
-    // Anything but the exact string "only" is `on`: an unknown spelling, a non-string.
-    for bad in [r#""ONLY""#, r#""off""#, "true", "1", "null"] {
-        assert_eq!(
-            eff(&format!(r#"{{"codemode":{{"mode":{bad}}}}}"#)).codemode_mode(),
-            CodemodeMode::On,
-            "mode {bad}"
-        );
-    }
-
-    // `0` is a valid budget (lists only namespaces); a fraction is kept as written.
-    assert_eq!(
-        eff(r#"{"codemode":{"inlineBudget":0}}"#).codemode_inline_budget(),
-        0.0
-    );
-    assert_eq!(
-        eff(r#"{"codemode":{"inlineBudget":1500.5}}"#).codemode_inline_budget(),
-        1500.5
-    );
-    // Negative and non-numeric budgets fall back to the default.
-    for bad in ["-1", r#""500""#, "true", "null"] {
-        assert_eq!(
-            eff(&format!(r#"{{"codemode":{{"inlineBudget":{bad}}}}}"#)).codemode_inline_budget(),
-            3000.0,
-            "budget {bad}"
-        );
-    }
-
-    // The raw object is parsed field-wise: a bad budget does not discard a good mode.
-    assert_eq!(
-        eff(r#"{"codemode":{"mode":"only","inlineBudget":"x"}}"#).codemode(),
-        CodemodeSettings {
-            mode: Some(CodemodeMode::Only),
-            inline_budget: None
-        }
-    );
-    // camelCase on the wire.
-    assert_eq!(
-        serde_json::to_value(CodemodeSettings {
-            mode: Some(CodemodeMode::On),
-            inline_budget: Some(10.0)
-        })
-        .unwrap(),
-        serde_json::json!({"mode": "on", "inlineBudget": 10.0})
     );
 }
 

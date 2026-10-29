@@ -41,7 +41,6 @@ mod support;
 // gate exists to prevent; see the `[[test]]` comment in crates/cyrup-it/Cargo.toml.
 // ---------------------------------------------------------------------------------------------
 
-mod codemode_real_run_screen;
 mod gap11_event_tier_verify;
 // Not drained from `crates/cyrup-session-svc/tests`: written here, because its proofs need the
 // assembled session's injection pump and post-run driver running against a scripted provider

@@ -323,8 +323,8 @@ built-in and starts active — the `mcp` gateway tool, for one. The built-ins re
 something that activates tools by name, an extension for one, can still turn one on: an armed
 [permission system](../guides/tools-and-permissions.md#the-permission-system) does, and with a policy
 present `-nbt` leaves every tool its policy does not deny active.
-`codemode` and `tool_search` start inactive, so this flag does not switch them on either; to run
-with `codemode` and no other built-in, name it: `--tools codemode`. Use `--no-tools` for a run with no
+`tool_search` starts inactive, so this flag does not switch it on either; to run with it and no
+other built-in, name it: `--tools tool_search`. Use `--no-tools` for a run with no
 tools at all; it wins over `--no-builtin-tools` when both are given. `--exclude-tools` is applied
 last, on top of whichever set the other three produced.
 
@@ -337,11 +337,10 @@ activates the tools of one named `docs`. With `"toolPrefix": "mcp"` the same too
 `mcp__github_<tool>` and `mcp__docs_<tool>`.
 
 MCP tools are treated apart. A `--tools` list with no entry that starts with `mcp__` leaves MCP
-tools registered, and what that reaches depends on how the server registers them (see
-[MCP tools](../guides/codemode.md#mcp-tools)): the tools of a `directTools: "search"` server stay
-callable from `codemode` scripts and loadable by `tool_search`, while eager tools and the `mcp`
-gateway are callable from a script only while active, so `--tools read,codemode` leaves a script
-without them. An entry that starts with `mcp__`, or an empty list (as `--no-tools` makes), makes the
+tools registered, and what that reaches depends on how the server registers them: the tools of a
+`directTools: "search"` server stay registered and loadable by `tool_search`, while eager tools and
+the `mcp` gateway are callable only while active, so `--tools read` leaves a session without them
+until something activates them. An entry that starts with `mcp__`, or an empty list (as `--no-tools` makes), makes the
 list decide for MCP tools too. The default `toolPrefix` gives no tool a name that starts with `mcp__`,
 so by default such an entry matches nothing and cuts off every MCP tool; to filter by server, set
 `"toolPrefix": "mcp"` and write `mcp__<server>_*`. `--exclude-tools` applies to every tool, MCP tools
@@ -359,51 +358,20 @@ cyrup --tools read,grep,find,ls -p "review the code in src/"
 
 See [Tools and permissions](../guides/tools-and-permissions.md).
 
-Built-in extensions add two more tools. Both start inactive. An MCP server that connects does not
-turn them on; name them in `--tools` or in `defaultTools`. The one exception is an armed permission
-system: with a policy present, every tool the policy does not deny is active, these two included (see
+Built-in extensions add one more tool. It starts inactive. An MCP server that connects does not
+turn it on; name it in `--tools` or in `defaultTools`. The one exception is an armed permission
+system: with a policy present, every tool the policy does not deny is active, this one included (see
 [The permission system](../guides/tools-and-permissions.md#the-permission-system)).
 
 | Built-in extension | Purpose |
 |---|---|
-| `codemode` | Run JavaScript that calls the other tools, for example in parallel with `Promise.allSettled`; only the script's output reaches the model |
-| `tool_search` | Search the tools that are not declared to the model (`codemode` and `deferred` exposure, such as the tools of an MCP server in search mode) and declare the matches for the next call |
-
-#### Enable codemode
-
-To turn `codemode` on for every session, add it to the default tools in `~/.cyrup/agent/settings.json`:
-
-```json
-{
-  "defaultTools": ["+codemode"]
-}
-```
-
-This keeps `read`, `bash`, `edit`, and `write` and adds `codemode`. For one invocation, list every
-tool, since `--tools` replaces the selection:
-
-```sh
-cyrup --tools read,bash,edit,write,codemode
-```
-
-The same line in a project's `.cyrup/settings.json` takes effect only in a trusted project, which in
-`-p`, `--mode json` and `--mode rpc` means passing `--approve`. `--no-extensions` removes the tool.
-With a permission policy present `codemode` is already active and needs no line; to keep it off
-there, deny it in the policy or pass `--exclude-tools codemode`.
-
-Codemode is useful without MCP: a script can run several tool calls in parallel, filter large output
-before it reaches the model, call classifier models through `models.classify()` and generate images
-through `models.generateImages()`. Scripts run in a V8 sandbox, each in a process of its own, and
-reach the other tools through `tools.<name>(args)` under the same permission gate as any call.
-[Codemode](../guides/codemode.md) describes the script API, which tools a script can call, the
-security model, the limits and what you see while a script runs.
+| `tool_search` | Search the tools that are not declared to the model (`deferred` exposure, such as the tools of an MCP server in search mode) and declare the matches for the next call |
 
 #### Tool search
 
-`tool_search` is off by default (a permission policy turns it on, like `codemode`); enable it with
-`"defaultTools": ["+tool_search"]` or `--tools`. It ranks the tools that are not declared yet, the
-same set `searchTools()` finds in a script, and declares the matches from the model's next call on.
-A script cannot call `tool_search`.
+`tool_search` is off by default (a permission policy turns it on); enable it with
+`"defaultTools": ["+tool_search"]` or `--tools`. It ranks the tools that are not declared yet and
+declares the matches from the model's next call on.
 
 ### Resources
 
@@ -428,8 +396,8 @@ checking whether the value names an existing file. Multiple `--append-system-pro
 joined with a blank line.
 
 `--no-extensions` also turns off installed-package extensions and the native extensions
-(subagents, the permission system, intercom, and the built-in MCP and `codemode` ones, so the `mcp`
-gateway tool and `codemode` do not exist in that run), and removes the built-in [llama.cpp](../llama-cpp.md)
+(subagents, the permission system, intercom, and the built-in MCP one, so the `mcp`
+gateway tool does not exist in that run), and removes the built-in [llama.cpp](../llama-cpp.md)
 provider and its `/llama` command. `-e` paths survive it. Relative resource paths resolve
 against the current directory.
 

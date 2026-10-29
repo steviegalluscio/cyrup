@@ -17,21 +17,22 @@ fn help_body_contains_pi_catalogue_examples_and_tools() {
     assert!(with_ext.contains("--plan"));
 }
 
-/// `--help` is where a user who has never read the guide looks for a tool they heard of. `codemode`
-/// is registered but off by default, so without an example in the Examples block nothing on that
-/// screen says it exists or how to switch it on (`args.ts:398` @v1.0.4 carries one for pi).
+/// `--help` is where a user who has never read the guide looks for a tool they heard of. A
+/// built-in that is registered but off by default (`tool_search` here; upstream's example names
+/// `codemode`, which this fork does not ship) needs an example in the Examples block, or nothing
+/// on that screen says it exists or how to switch it on (`args.ts:398` @v1.0.4 carries one for pi).
 #[test]
-fn help_has_a_codemode_example_in_the_examples_block() {
+fn help_has_a_default_off_builtin_example_in_the_examples_block() {
     let help = render_help(&[]);
     let (_, rest) = help.split_once("Examples:").expect("an Examples block");
     let (examples, _) = rest
         .split_once("Environment Variables:")
         .expect("the block ends at the environment variables");
     assert!(
-        examples.contains("cyrup --tools read,bash,edit,write,codemode\n"),
+        examples.contains("cyrup --tools read,bash,edit,write,tool_search\n"),
         "{examples}"
     );
-    assert!(examples.contains("+codemode"), "{examples}");
+    assert!(examples.contains("+tool_search"), "{examples}");
 }
 
 fn declared(name: &str, ty: &str, description: Option<&str>) -> ExtensionFlagDeclaration {

@@ -24,7 +24,6 @@ mod adapters;
 mod auto_compaction;
 mod bash;
 mod boundary;
-mod codemode;
 mod commands;
 mod compaction;
 mod control;
@@ -55,8 +54,6 @@ mod types;
 mod virtual_models;
 
 // The seam surface `lib.rs` re-exports (`pub use session::{...}`) — same names, same paths.
-pub(crate) use codemode::CodemodeSettings;
-pub use codemode::SessionCodemodeHost;
 pub use files::{delete_session_file_at, rename_session_file_at};
 pub use types::{
     BindOptions, CompactionCostKind, DeleteMethod, ForkAnchor, ForkOutcome, ForkPosition,
@@ -149,9 +146,6 @@ pub(crate) struct SessionExtras {
     /// (CODE-006; pi passes `this._beforeToolCall` / `this._afterToolCall` to `runToolCall`,
     /// `agent-session.ts:719-733` @v1.0.1).
     pub hooks: Arc<dyn cyrup_agent::Hooks>,
-    /// The host the `codemode` tool acts through, when the builder was given a codemode extension
-    /// (`SessionBuilder::with_codemode`). [`AgentSession::into_shared`] attaches the session to it.
-    pub codemode_host: Option<Arc<SessionCodemodeHost>>,
     /// `read`'s view of whether the ACTIVE model accepts image input, re-pushed on every `/model`
     /// switch so the tool's non-vision warning tracks the live model rather than the startup one.
     pub read_model_vision: cyrup_tools::config::ModelVisionHandle,
@@ -391,8 +385,6 @@ pub struct AgentSession {
     /// Also the [`cyrup_ext::NestedToolRunner`] the extension host holds (weakly), which is how an
     /// extension tool's `ctx.executeTool` reaches [`Self::execute_nested_tool`].
     nested: Arc<nested::SessionNested>,
-    /// The host the `codemode` tool acts through, if the builder was given a codemode extension.
-    codemode_host: Option<Arc<SessionCodemodeHost>>,
     // ---- post-run execution loop (Pi `_runAgentPrompt`/`_handlePostAgentRun`,
     //      agent-session.ts:973-1022; the assembled-run driver) ----
     /// Weak self-reference, bound by [`Self::into_shared`]; shared with the persist+fan-out
@@ -477,6 +469,29 @@ pub struct AgentSession {
 }
 
 impl AgentSession {
+    /// Append a custom (non-LLM) entry to the live session tree and announce it (pi
+    /// `pi.appendEntry` → `sessionManager.appendCustomEntry` + `entry_appended`,
+    /// `agent-session.ts:2265-2271`). The async twin of the guest-facing
+    /// [`cyrup_ext::host::HostServices::append_entry`], which cannot wait for the manager and
+    /// refuses when a turn holds it; a tool running mid-turn must wait instead.
+    pub(crate) async fn append_custom_entry(
+        &self,
+        custom_type: &str,
+        data: serde_json::Value,
+    ) -> Result<(), cyrup_session::SessionError> {
+        let entry = {
+            let mut manager = self.manager.lock().await;
+            let id = manager.append_custom_entry(custom_type, Some(data))?;
+            manager
+                .entry(&id)
+                .and_then(|entry| serde_json::to_value(entry).ok())
+                .unwrap_or(serde_json::Value::Null)
+        };
+        self.fanout_emit(AgentSessionEvent::EntryAppended { entry })
+            .await;
+        Ok(())
+    }
+
     /// Build from the assembled parts (called by [`crate::SessionBuilder::build`]).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_parts(
@@ -581,7 +596,6 @@ impl AgentSession {
             read_model_resize: extras.read_model_resize,
             dynamic_tools: extras.dynamic_tools,
             nested,
-            codemode_host: extras.codemode_host,
             handle: extras.handle,
             last_assistant: Mutex::new(None),
             driver_tx: driver_tx_init,
@@ -634,12 +648,6 @@ impl AgentSession {
         let handle = self.handle.clone();
         let arc = Arc::new(self);
         let _ = handle.weak.set(Arc::downgrade(&arc));
-        // The `codemode` tool acts through the session it runs in: nested calls, the branch its
-        // `store()` replays over, and the model registry behind `models`. Weak, so the host (which
-        // the extension's slot keeps alive) never keeps the session alive.
-        if let Some(host) = &arc.codemode_host {
-            host.attach(Arc::downgrade(&arc));
-        }
         // Bind the message-injection seam (R-SA-101 / P-2): a background task calling
         // `LiveHostServices::inject_message`/`inject_message_ack` (e.g. cyrup-ext-subagents'
         // completion sink, or a native extension holding the P-1 host-services Arc) reaches THIS

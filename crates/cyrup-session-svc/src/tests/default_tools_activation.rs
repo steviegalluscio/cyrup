@@ -1,14 +1,16 @@
 //! `defaultTools` reaches the tools an extension registered — `codemode` first of all.
 //!
-//! `"defaultTools": ["+codemode"]` is the documented way to switch `codemode` on. The built-in
+//! `"defaultTools": ["+codemode"]` is pi's documented way to switch `codemode` on. The built-in
 //! selector only walks the built-in registry, so the setting reached `read`/`bash`/`edit`/`write`
 //! and nothing else: the session started with `codemode` registered and inactive, and
 //! `["read", "codemode"]` produced a session with `read` alone.
 //!
 //! Every case here goes through the REAL [`SessionBuilder`] — settings document in, the session's
-//! active tool names out — with the real `codemode` extension attached the way the binary attaches
-//! it. A test of the selector alone could not have caught this: the selector was never handed the
-//! extension's tools.
+//! active tool names out. **[CYRUP-DELTA]** this fork does not ship the `codemode` built-in
+//! (docs/LEAN-FORK-PLAN.md), so the registered-inactive extension tool these cases name is a
+//! [`Probe`] standing in for it — same name, same `ModelOnly` exposure, same registration path as
+//! pi's `builtin:codemode`. A test of the selector alone could not have caught the original bug:
+//! the selector was never handed the extension's tools.
 //!
 //! Pi, read at v1.0.4: `sdk.ts:274-276` builds `initialActiveToolNames` from `options.tools ??
 //! (options.noTools ? [] : (configuredDefaultToolNames ?? DEFAULT_TOOL_NAMES))`, the session
@@ -25,8 +27,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use cyrup_codemode_runtime::CodemodeExtension;
-use cyrup_codemode_runtime::testkit::{ScriptedSandboxFactory, completed};
 use cyrup_config::{FileSettingsStore, InMemorySettingsStore, SettingsScope};
 use cyrup_core::{
     CancelToken, ExtensionId, StopReason, Tool, ToolCallId, ToolError, ToolExposure, ToolResult,
@@ -35,7 +35,6 @@ use cyrup_core::{
 use cyrup_ext::{ExtError, HookOutcome, HostCtx, HostEvent, InitApi, NativeExtension};
 use cyrup_provider::Provider;
 use cyrup_provider::faux::{FauxProvider, FauxResponseStep, faux_assistant_message, faux_text};
-use futures::FutureExt as _;
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -128,13 +127,10 @@ impl NativeExtension for ProbesExt {
     }
 }
 
-fn codemode_extension() -> CodemodeExtension {
-    let script: cyrup_codemode_runtime::testkit::Script =
-        Arc::new(|_code, _env| async { completed(Vec::new(), None) }.boxed());
-    CodemodeExtension::new(
-        Default::default(),
-        Arc::new(ScriptedSandboxFactory::new(script)),
-    )
+/// The registered-inactive extension tool these cases name: a [`Probe`] standing in for pi's
+/// `builtin:codemode` at the same name and exposure, since this fork does not ship it.
+fn codemode_probe() -> Vec<Arc<dyn Tool>> {
+    vec![Probe::arc("codemode", ToolExposure::ModelOnly, false)]
 }
 
 /// One session's inputs: the settings documents and the command-line selection.
@@ -183,8 +179,9 @@ async fn build(spec: Spec) -> (Arc<AgentSession>, Fixture) {
         config(&fx, &spec),
     )
     .settings_store(store)
-    .with_codemode(codemode_extension())
-    .with_native_extension(Arc::new(ProbesExt(spec.probes)))
+    .with_native_extension(Arc::new(ProbesExt(
+        [spec.probes, codemode_probe()].concat(),
+    )))
     .build()
     .await
     .unwrap()
@@ -488,7 +485,7 @@ async fn the_names_still_waiting_when_a_run_starts_are_dropped() {
     let spec = Spec::default();
     let session = SessionBuilder::new(faux.clone() as Arc<dyn Provider>, config(&fx, &spec))
         .settings_store(store)
-        .with_codemode(codemode_extension())
+        .with_native_extension(Arc::new(ProbesExt(codemode_probe())))
         .build()
         .await
         .unwrap()
@@ -534,7 +531,7 @@ async fn runtime_over(fx: &Fixture, initial: &str) -> Arc<AgentSessionRuntime> {
     let factory = Arc::new(
         SessionFactory::new(faux as Arc<dyn Provider>, cfg)
             .settings_store(store)
-            .with_codemode(codemode_extension()),
+            .with_native_extension(Arc::new(ProbesExt(codemode_probe()))),
     );
     let runtime = AgentSessionRuntime::create(factory, SessionTarget::New)
         .await

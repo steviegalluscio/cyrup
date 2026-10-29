@@ -90,11 +90,6 @@ mod auth_credential_print;
 /// SEAM-170: the binary's own background catalog refresh reaches the running session's `/model`
 /// and its stream (through a loopback proxy that holds the `pi.dev` tunnel; no network).
 mod catalog_refresh_reaches_the_session;
-/// The codemode tool on the wire: the request a provider receives and the tool result the next
-/// request carries, from the real binary against an in-process fake OpenAI server. Unix only: it
-/// signals and inspects real processes (`/proc`, `kill`).
-#[cfg(unix)]
-mod codemode_wire;
 mod extension_load_failure_exit;
 /// CFG-088 / SEAM-020: `--help` after the runtime — extension flags plus the startup settings
 /// diagnostics, both only visible on the real binary's stdio.

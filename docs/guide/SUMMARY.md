@@ -15,7 +15,6 @@
 - [Models and thinking](guides/models.md)
 - [Local models with llama.cpp](llama-cpp.md)
 - [Tools and permissions](guides/tools-and-permissions.md)
-- [Codemode scripts](guides/codemode.md)
 - [Project context and skills](guides/project-context.md)
 - [Themes](guides/themes.md)
 - [Scripting and automation](guides/scripting.md)

@@ -32,13 +32,12 @@ regular file, such as a device (`/dev/zero`), a pipe or a socket. Use `bash` (`h
 **Only four are active by default:** `read`, `bash`, `edit`, and `write`. `grep`, `find`, `ls` and
 `powershell` are registered but off, so the model reaches for `bash` to search unless you turn them on with `--tools`.
 
-Two more tools come from built-in extensions and start off as well. `codemode` lets the model write
-one JavaScript script that calls the other tools, in parallel if it likes, and only the script's
-output comes back to it. `tool_search` finds tools that are not declared to the model yet and
-declares the matches. Turn `codemode` on with `"defaultTools": ["+codemode"]` in `settings.json`, or
-for one run with `--tools read,bash,edit,write,codemode`; see [Codemode](codemode.md). None of this
+One more tool comes from a built-in extension and starts off as well: `tool_search` finds tools that
+are not declared to the model yet and declares the matches. Turn it on with
+`"defaultTools": ["+tool_search"]` in `settings.json`, or for one run with
+`--tools read,bash,edit,write,tool_search`. None of this
 holds once [the permission system](#the-permission-system) is armed: then the policy decides which
-tools are active, and every tool it does not deny is, `grep`, `find`, `ls`, `powershell`, `codemode`
+tools are active, and every tool it does not deny is, `grep`, `find`, `ls`, `powershell`
 and `tool_search` included.
 
 Two details that matter if you read session files or debug a provider rejection:
@@ -69,8 +68,8 @@ of whatever survives, so a name in both lists is removed.
 
 `--tools`, `--exclude-tools` and `--no-tools` bound what is registered, not only what starts active.
 A built-in the flags do not allow cannot be switched back on later by an extension, by the
-permission system or by `setActiveTools`, and a `codemode` script cannot call it: `tools.bash` does
-not exist in a session started with `--tools read,grep,codemode`. (`--no-builtin-tools` only changes
+permission system or by `setActiveTools`, and a call naming it gets nothing: the session answers
+`Tool bash not found` in a run started with `--tools read,grep`. (`--no-builtin-tools` only changes
 the starting set, so the built-ins stay switchable, and an armed permission system switches them back
 on.)
 
@@ -80,7 +79,7 @@ on.)
 
 `--no-builtin-tools` turns off every built-in tool: the four that are on by default and `grep`, `find`,
 `ls` and `powershell`, which are registered but off. It leaves extension and custom tools alone, such
-as the `mcp` gateway tool, and it does not switch on `codemode`, which starts off. A run with `-nbt`
+as the `mcp` gateway tool, and it does not switch on `tool_search`, which starts off. A run with `-nbt`
 therefore has no file or shell tool of its own; for no tools at all, use `--no-tools`. The built-ins
 stay registered, so something that activates tools by name, an extension for one, can still turn one on;
 the permission system does when a policy is armed.
@@ -208,11 +207,11 @@ set `"enabled": false` in `~/.cyrup/agent/cyrup-permission-system/config.json`.
 sets the active tools to every registered tool its policy does not `deny`, whatever `defaultTools` or
 `--no-builtin-tools` say. Measured with only a `cyrup-permissions.jsonc` present (`"tools"` set to `allow`
 or to `ask` in its `defaultPolicy`) and no `defaultTools`: the first request declared `read`, `bash`, `edit`, `write`,
-`grep`, `find`, `ls`, `powershell`, `mcp`, `ask_user_question`, `codemode` and `tool_search`, and the
+`grep`, `find`, `ls`, `powershell`, `mcp`, `ask_user_question` and `tool_search`, and the
 system prompt of that request lists the same tools and carries the rules for them. That
 includes a policy file in `.cyrup/agent/` of an untrusted project. `--tools`, `--no-tools` and
-`--exclude-tools` still bound the set, and so does a `deny` rule: `"tools": { "codemode": "deny" }`
-keeps `codemode` out. `--no-extensions` skips the permission system along with the other built-in
+`--exclude-tools` still bound the set, and so does a `deny` rule: `"tools": { "tool_search": "deny" }`
+keeps `tool_search` out. `--no-extensions` skips the permission system along with the other built-in
 extensions. Check what a policy leaves active before relying on a smaller default tool set.
 
 When a rule says `ask`, you get a dialog naming the tool and what it wants to do, with four choices:
@@ -222,9 +221,9 @@ When a rule says `ask`, you get a dialog naming the tool and what it wants to do
 - **Reject** — refuse.
 - **Reject with Reason** — refuse and type a sentence the model sees, which is how you redirect it
   rather than just blocking it.
-- **Reject All From This Script** — offered only for a call a codemode script made: refuse it and
-  end the script, so it makes no further call and you get no further dialog from it. What the script
-  already did is not undone.
+- **Reject All From This Script** — offered only for a call another tool made while it ran (a nested
+  call): refuse it and end the calling tool, so it makes no further call and you get no further
+  dialog from it. What it already did is not undone.
 
 `Esc`, dismissing the dialog, or letting it time out all count as a plain reject.
 
@@ -232,9 +231,9 @@ Where nobody can answer, an `ask` is a block: `-p` and `--mode json` have no UI,
 with `requires approval, but no interactive UI is available`. `--mode rpc` does have one, the client:
 the dialog reaches it as an `extension_ui_request` and its `extension_ui_response` decides.
 
-A [codemode](codemode.md#permissions) script's calls are gated one by one, like any other: you are
-asked for the script and again for each call that resolves to `ask`, and the prompt of such a call
-ends with `(from codemode script)`.
+A call another tool made while it ran is gated one by one, like any other: you are asked for the
+calling tool and again for each nested call that resolves to `ask`, and the prompt of such a call
+ends with `(from a nested call of tool '<name>')`.
 
 The policy syntax, the four layers, and how a project policy can only tighten a global one are
 covered in [The permission system](../extensions/permissions.md).

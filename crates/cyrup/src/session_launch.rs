@@ -43,21 +43,6 @@ use crate::cli::Cli;
 use crate::diagnostics::{self, Diagnostic};
 use crate::timings;
 
-/// Where `codemode` scripts run: a `__codemode-sandbox` process of this executable each
-/// ([`crate::codemode_sandbox_cmd`]).
-#[cfg(not(test))]
-fn codemode_sandbox_factory() -> Arc<dyn cyrup_codemode_runtime::tool::SandboxFactory> {
-    Arc::new(cyrup_codemode_runtime::tool::IsolatedSandboxFactory::current_exe())
-}
-
-/// The unit-test binary is not the `cyrup` binary: re-executed with `__codemode-sandbox` it would
-/// read the argument as a test filter and exit without a word. Its scripts run in-process; the hop
-/// itself is covered by `tests/codemode_sandbox_hop.rs`, which spawns the real binary.
-#[cfg(test)]
-fn codemode_sandbox_factory() -> Arc<dyn cyrup_codemode_runtime::tool::SandboxFactory> {
-    Arc::new(cyrup_codemode_runtime::tool::EngineSandboxFactory)
-}
-
 /// Attach the native built-in extensions to `builder`, in pi's load order.
 ///
 /// This is the ONE copy of a sequence that used to exist verbatim in all three mode arms. The
@@ -131,9 +116,10 @@ fn codemode_sandbox_factory() -> Arc<dyn cyrup_codemode_runtime::tool::SandboxFa
 ///    every child would put the skill into every child's system prompt for a pipeline the child is
 ///    not running.
 ///
-/// The four natives pi ships as `builtin:<name>` extension resources — llama.cpp, codemode,
-/// tool-search and mcp — attach only when `builtins` selects them (EXT-094): see
-/// [`BuiltinSelection`].
+/// The three natives pi ships as `builtin:<name>` extension resources — llama.cpp, tool-search
+/// and mcp — attach only when `builtins` selects them (EXT-094): see [`BuiltinSelection`].
+///
+/// **[CYRUP-DELTA]** pi's fourth built-in, `codemode`, is not shipped by this fork (docs/LEAN-FORK-PLAN.md).
 fn attach_native_extensions(
     mut builder: SessionFactory,
     dirs: &ConfigDirs,
@@ -171,28 +157,7 @@ fn attach_native_extensions(
     if let Some(ext) = crate::router_example::router_extension_for_env() {
         builder = builder.with_native_extension(ext);
     }
-    // `codemode` is the next entry of pi's `builtInExtensions` (`extensions/index.ts:9-14`
-    // @v1.0.1), registered inactive and replaceable. Its scripts run in V8 isolates (ADR-0031),
-    // each in a `__codemode-sandbox` process of its own ([`crate::codemode_sandbox_cmd`]): V8 aborts
-    // the whole process on an allocation the heap cannot satisfy, which a script can ask for.
-    //
-    // The script reference the description points at is embedded in the binary and written under
-    // the agent directory, because an installed binary has no `docs/` next to it.
-    if builtins.attaches(cyrup_codemode_runtime::EXTENSION_ID) {
-        let ext = cyrup_codemode_runtime::CodemodeExtension::new(
-            cyrup_codemode_runtime::tool::CodemodeHostSlot::new(),
-            codemode_sandbox_factory(),
-        )
-        .with_agent_dir(agent_dir);
-        builder = builder.with_codemode(
-            if builtins.is_explicit(cyrup_codemode_runtime::EXTENSION_ID) {
-                ext.loaded_explicitly()
-            } else {
-                ext
-            },
-        );
-    }
-    // `tool_search` follows it (`extensions/index.ts:12` @v1.0.1): registered inactive and
+    // `tool_search` follows pi's second built-in (`extensions/index.ts:12` @v1.0.1): registered inactive and
     // replaceable, it loads `codemode` and `deferred` tools into the active set on request.
     if builtins.attaches(cyrup_tool_search::EXTENSION_ID) {
         let ext = cyrup_tool_search::ToolSearchExtension::new();
@@ -464,9 +429,8 @@ pub fn build_factory(
 
 /// The names pi's `builtInExtensions` gives its built-in extensions (`extensions/index.ts`), each
 /// an extension resource `builtin:<name>`. cyrup's natives for them load under the same ids.
-pub const BUILTIN_EXTENSIONS: [&str; 4] = [
+pub const BUILTIN_EXTENSIONS: [&str; 3] = [
     cyrup_llama::LLAMA_PROVIDER_ID,
-    cyrup_codemode_runtime::EXTENSION_ID,
     cyrup_tool_search::EXTENSION_ID,
     cyrup_mcp::EXTENSION_ID,
 ];
@@ -921,8 +885,8 @@ fn resolve_scoped_models_reporting(
     (scoped, diagnostics)
 }
 
-/// The MCP surface of a launched session: the wait for servers, the result a script receives,
-/// `--tools` patterns, `--no-mcp` and `codemode.mode: only`, over a real stdio server.
+/// The MCP surface of a launched session: the wait for a starting server, the result a tool call
+/// receives, `--tools` patterns, `--no-mcp`, over a real stdio server.
 #[cfg(test)]
 #[path = "session_launch/mcp_tests.rs"]
 mod mcp_tests;
@@ -1495,9 +1459,10 @@ mod tests {
     /// `loadExtensionPaths` (`core/resource-loader.ts:741` @f1b2e77f5), which every `builtin:`
     /// path reaches — settings-resolved and `-e` (`cliEnabledExtensions`) alike, merged into one
     /// `extensionPaths` before `loadFinalExtensionSet` — and its `builtin: true` entries are
-    /// `llama.cpp`, `codemode`, `tool-search` and `mcp` (`extensions/index.ts`). Everything else
+    /// `llama.cpp`, `codemode`, `tool-search` and `mcp` (`extensions/index.ts`); this fork ships
+    /// three of them (`codemode` is deleted, docs/LEAN-FORK-PLAN.md). Everything else
     /// reaches pi as a file or package path and is listed. cyrup's `builtin:<name>` path is
-    /// [`super::BuiltinSelection`] (EXT-094), the only way those four natives are attached, so the
+    /// [`super::BuiltinSelection`] (EXT-094), the only way those natives are attached, so the
     /// expected state of every loaded native is derived from [`BUILTIN_EXTENSIONS`] — no per-native
     /// table — and the host's answer (`NativeExtension::is_hidden`, read through the startup
     /// `[Extensions]` list) must agree with it.
@@ -1505,8 +1470,8 @@ mod tests {
     async fn every_attached_native_is_hidden_exactly_when_pi_loads_its_counterpart_as_a_builtin() {
         assert_eq!(
             BUILTIN_EXTENSIONS,
-            ["llama.cpp", "codemode", "tool-search", "mcp"],
-            "cyrup's builtin: names are pi's `builtInExtensions` (extensions/index.ts @f1b2e77f5)"
+            ["llama.cpp", "tool-search", "mcp"],
+            "cyrup's builtin: names are pi's `builtInExtensions` minus `codemode`, which this fork does not ship"
         );
         let explicit: Vec<String> = BUILTIN_EXTENSIONS
             .iter()
@@ -2733,13 +2698,7 @@ mod tests {
                 "--no-extensions drops {id}; got {bare:?}"
             );
         }
-        // EXT-112: codemode too, which `-ne` dropped even when `-e builtin:codemode` named it.
-        for id in [
-            LLAMA_ID,
-            cyrup_codemode_runtime::EXTENSION_ID,
-            cyrup_tool_search::EXTENSION_ID,
-            MCP_ID,
-        ] {
+        for id in BUILTIN_EXTENSIONS {
             let path = format!("builtin:{id}");
             let run = launch_with_builtins(None, true, &[&path]).await;
             let loaded = &run.loaded;
@@ -2800,12 +2759,18 @@ mod tests {
     // ============================================================================================
     // `--tools` / `--exclude-tools` — the allowlist bounds the REGISTRY, not only the initial
     // selection (pi `_isAllowedTool`, `agent-session.ts` `_refreshToolRegistry` @v1.0.4 drops a
-    // disallowed built-in before the registry is built, so `setActiveToolsByName` and a codemode
-    // script's `tools.*` can only ever reach what the flags allow).
+    // disallowed built-in before the registry is built, so `setActiveToolsByName` and a tool call can
+    // only ever reach what the flags allow).
     //
     // Driven over the real launch wiring: `build_factory` attaches the permission system (policy file
-    // present, so it installs), `codemode` and `tool_search`; the permission extension's
-    // `before_agent_start` runs on every turn and names every registry tool it exposes.
+    // present, so it installs) and `tool_search`; the permission extension's `before_agent_start`
+    // runs on every turn and names every registry tool it exposes. The scripted model CALLS the tool
+    // under test, so "can this tool be reached" is answered by the result the session hands back for
+    // a call the model actually made — and a call that reaches `bash` is visible in the transcript.
+    //
+    // **[CYRUP-DELTA]** pi walks the registry from inside a `codemode` script (`tools.*`); this fork
+    // ships no codemode (docs/LEAN-FORK-PLAN.md), so the same registry-bound property is pinned from
+    // the model's own tool call, which is the only other caller a session has.
     // ============================================================================================
 
     /// A hermetic world whose `cyrup-permissions.jsonc` makes the permission system install.
@@ -2831,56 +2796,48 @@ mod tests {
     }
 
     /// The built-in tool names a session may not expose when the flags allow only `read`, `grep` and
-    /// `codemode`.
-    const NARROWED_OUT: [&str; 5] = ["bash", "edit", "write", "find", "ls"];
+    /// `bash`.
+    const NARROWED_OUT: [&str; 4] = ["edit", "write", "find", "ls"];
 
-    /// The script every allowlist test runs: which built-ins `tools` offers, and what calling
-    /// `tools.bash` does.
-    const PROBE_SCRIPT: &str = r#"
-        const offered = {};
-        for (const name of ["read", "bash", "edit", "write", "grep", "find", "ls"]) {
-            offered[name] = name in tools;
-        }
-        let bash = "not attempted";
-        if (offered.bash) {
-            try { bash = JSON.stringify(await tools.bash({ command: "echo reached-bash" })); }
-            catch (e) { bash = "threw: " + String(e); }
-        }
-        return JSON.stringify({ offered, bash });
-    "#;
+    /// The command every probe makes the model run through `bash`: it leaves `reached-bash` in the
+    /// session's cwd, which is the only unambiguous evidence that the command ran — a block reason
+    /// quotes the command back, so an echoed marker cannot tell the two apart.
+    const PROBE_COMMAND: &str = "touch reached-bash";
 
-    /// Run [`PROBE_SCRIPT`] through the `codemode` tool of a session launched with `configure`,
-    /// after the permission system's `before_agent_start` has run on the turn that calls it.
-    /// Returns the session, the tool names every request declared, and the script's answer.
-    async fn probe_allowlist(
-        configure: impl FnOnce(&mut SessionConfig),
-    ) -> (
-        Arc<AgentSessionRuntime>,
-        Vec<Vec<String>>,
-        serde_json::Value,
-        tempfile::TempDir,
-    ) {
-        let world = permission_world();
-        probe_script(world, PROBE_SCRIPT, configure).await
+    /// What a probe run produced.
+    struct Probe {
+        runtime: Arc<AgentSessionRuntime>,
+        /// The tool names each provider request declared, in request order.
+        requests: Vec<Vec<String>>,
+        /// The text of the `bash` tool result the session produced for the model's call.
+        bash_result: String,
+        /// Whether that result was an error result.
+        bash_is_error: bool,
+        /// The session's cwd — where [`PROBE_COMMAND`] leaves its marker.
+        cwd: std::path::PathBuf,
+        /// Kept alive so the hermetic world outlives the session.
+        _tmp: tempfile::TempDir,
     }
 
-    /// [`probe_allowlist`] over any world and any script that returns `JSON.stringify(answer)`.
-    async fn probe_script(
+    impl Probe {
+        /// Whether the probe command actually ran.
+        fn command_ran(&self) -> bool {
+            self.cwd.join("reached-bash").exists()
+        }
+    }
+
+    /// Launch a session in `world` with the flags `configure` sets, make the model call `bash` with
+    /// [`PROBE_COMMAND`], and report what the session answered.
+    async fn probe_bash(
         world: (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf),
-        script: &str,
         configure: impl FnOnce(&mut SessionConfig),
-    ) -> (
-        Arc<AgentSessionRuntime>,
-        Vec<Vec<String>>,
-        serde_json::Value,
-        tempfile::TempDir,
-    ) {
+    ) -> Probe {
         let (tmp, agent_dir, cwd) = world;
         let declared: Declared = Arc::default();
         let provider = scripted(
             &declared,
             vec![
-                Some(("codemode", serde_json::json!({ "code": script }))),
+                Some(("bash", serde_json::json!({ "command": PROBE_COMMAND }))),
                 None,
             ],
         );
@@ -2889,8 +2846,23 @@ mod tests {
         let session = runtime.session().await;
         let _ = session.prompt("probe").await.unwrap();
         session.wait_for_idle().await;
-        let (content, _details) = last_tool_result(&session, "codemode").await;
-        let text = content
+
+        let (content, _, is_error) = session
+            .messages()
+            .await
+            .into_iter()
+            .rev()
+            .find_map(|message| match message {
+                cyrup_core::Message::ToolResult {
+                    tool_name,
+                    content,
+                    is_error,
+                    ..
+                } if tool_name == "bash" => Some((content, (), is_error)),
+                _ => None,
+            })
+            .expect("a `bash` tool result");
+        let bash_result = content
             .iter()
             .filter_map(|c| match c {
                 cyrup_core::Content::Text { text, .. } => Some(text.as_str()),
@@ -2898,33 +2870,31 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        let start = text
-            .find('{')
-            .unwrap_or_else(|| panic!("no JSON answer in {text:?}"));
-        let end = text
-            .rfind('}')
-            .unwrap_or_else(|| panic!("no JSON answer in {text:?}"));
-        let answer: serde_json::Value = serde_json::from_str(&text[start..=end])
-            .unwrap_or_else(|e| panic!("script answer is not JSON ({e}): {text:?}"));
-        let requests = declared.lock().unwrap().clone();
-        (runtime, requests, answer, tmp)
+        Probe {
+            runtime,
+            requests: declared.lock().unwrap().clone(),
+            bash_result,
+            bash_is_error: is_error,
+            cwd,
+            _tmp: tmp,
+        }
     }
 
-    /// `--tools read,grep,codemode`: a disallowed built-in is not in the registry, so neither the
-    /// permission extension's per-turn `set_active_tools` nor a codemode script can reach it.
+    /// `--tools read,bash`: a disallowed built-in is not in the registry, so neither the permission
+    /// extension's per-turn `set_active_tools` nor a tool call can reach it.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn tools_allowlist_bounds_the_registry_the_permission_gate_and_codemode_reach() {
-        let (runtime, requests, answer, _tmp) = probe_allowlist(|cfg| {
-            cfg.tools = Some(vec!["read".into(), "grep".into(), "codemode".into()]);
+    async fn tools_allowlist_bounds_the_registry_the_permission_gate_reaches() {
+        let probe = probe_bash(permission_world(), |cfg| {
+            cfg.tools = Some(vec!["read".into(), "grep".into(), "bash".into()]);
         })
         .await;
-        let session = runtime.session().await;
+        let session = probe.runtime.session().await;
 
-        for request in &requests {
+        for request in &probe.requests {
             for name in NARROWED_OUT {
                 assert!(
                     !request.iter().any(|declared| declared == name),
-                    "`{name}` was declared to the model under --tools read,grep,codemode: {request:?}"
+                    "`{name}` was declared to the model under --tools read,grep,bash: {request:?}"
                 );
             }
         }
@@ -2943,100 +2913,162 @@ mod tests {
                 !active.iter().any(|n| n == name),
                 "`{name}` is active: {active:?}"
             );
-            assert_eq!(
-                answer["offered"][name],
-                serde_json::json!(false),
-                "`tools.{name}` is callable from a codemode script: {answer}"
-            );
         }
-        assert_eq!(
-            answer["offered"]["read"],
-            serde_json::json!(true),
-            "{answer}"
+        assert!(
+            registered.iter().any(|n| n == "read") && registered.iter().any(|n| n == "bash"),
+            "the allowlisted tools are in the registry: {registered:?}"
         );
-        assert_eq!(
-            answer["offered"]["grep"],
-            serde_json::json!(true),
-            "{answer}"
+        // `bash` IS allowed here, so the call is what proves the world is live: the command ran.
+        assert!(
+            !probe.bash_is_error && probe.command_ran(),
+            "an allowlisted `bash` call did not run: {:?}",
+            probe.bash_result
         );
     }
 
-    /// The script the permission tests run: call `tools.bash` and report what happened.
-    const BASH_PROBE: &str = r#"
-        const offered = "bash" in tools;
-        let outcome = "not attempted";
-        if (offered) {
-            try { outcome = "ran: " + JSON.stringify(await tools.bash({ command: "echo reached-bash" })); }
-            catch (e) { outcome = "threw: " + String(e && e.message || e); }
-        }
-        return JSON.stringify({ offered, outcome });
-    "#;
-
-    /// A policy that denies the whole `bash` tool: through the real permission extension and the
-    /// real session builder, a `codemode` script cannot reach it. The tool is not in the script's
-    /// `tools` at all (the gate hides what it denies), and nothing runs.
+    /// The same bound from the other side: a tool the allowlist does not name is unreachable by CALL
+    /// as well as by declaration — the session answers the call itself.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_deny_rule_for_bash_keeps_tools_bash_out_of_a_codemode_script() {
+    async fn a_tool_the_allowlist_drops_is_unreachable_to_a_call_as_well_as_to_the_model() {
+        let probe = probe_bash(permission_world(), |cfg| {
+            cfg.tools = Some(vec!["read".into(), "grep".into()]);
+        })
+        .await;
+        assert!(
+            probe.bash_is_error,
+            "the call to a dropped tool is an error result: {:?}",
+            probe.bash_result
+        );
+        assert!(
+            !probe.command_ran(),
+            "the command ran: {:?}",
+            probe.bash_result
+        );
+        let session = probe.runtime.session().await;
+        assert!(
+            !session.all_tools().iter().any(|row| row.name == "bash"),
+            "`bash` is in the registry under --tools read,grep"
+        );
+        for request in &probe.requests {
+            assert!(
+                !request.iter().any(|name| name == "bash"),
+                "`bash` was declared to the model: {request:?}"
+            );
+        }
+    }
+
+    /// A policy that denies the whole `bash` tool: through the real permission extension and the real
+    /// session builder the call never runs, and the reason names the policy. The tool is not declared
+    /// to the model either — the gate hides what it denies.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_deny_rule_for_bash_blocks_the_call_and_hides_the_tool_from_the_model() {
         let world = permission_world_with(
             r#"{ "defaultPolicy": { "tools": "allow", "bash": "allow", "mcp": "allow", "skills": "allow" },
                  "tools": { "bash": "deny" } }"#,
         );
-        let (_runtime, _requests, answer, _tmp) = probe_script(world, BASH_PROBE, |_| {}).await;
-        assert_eq!(answer["offered"], serde_json::json!(false), "{answer}");
-        assert_eq!(answer["outcome"], "not attempted", "{answer}");
+        let probe = probe_bash(world, |_| {}).await;
+        assert!(
+            probe.bash_is_error,
+            "a denied tool call is an error result: {:?}",
+            probe.bash_result
+        );
+        assert!(
+            !probe.command_ran(),
+            "the command ran: {:?}",
+            probe.bash_result
+        );
+        // A tool denied outright is not merely blocked: the gate takes it out of the reachable set,
+        // so the call answers like a call to a tool that is not there.
+        assert!(
+            probe.bash_result.contains("not found"),
+            "the denied tool is still reachable: {:?}",
+            probe.bash_result
+        );
+        // The gate HIDES what it denies rather than unregistering it: the built-in stays in the
+        // registry, is not active, is not declared, and a call that names it gets nothing.
+        let session = probe.runtime.session().await;
+        assert!(
+            session.all_tools().iter().any(|row| row.name == "bash"),
+            "a denied built-in was dropped from the registry, which is a different defect"
+        );
+        assert!(
+            !session.active_tool_names().iter().any(|n| n == "bash"),
+            "a denied `bash` is active"
+        );
+        for request in &probe.requests {
+            assert!(
+                !request.iter().any(|name| name == "bash"),
+                "a denied `bash` is still declared to the model: {request:?}"
+            );
+        }
     }
 
-    /// A command-level deny reaches the gate through the nested call: the script's call rejects with
-    /// the policy's text, and the command never runs.
+    /// A command-level deny reaches the call itself: the result carries the policy's text, and the
+    /// command never runs.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_deny_rule_for_one_bash_command_rejects_that_nested_call() {
+    async fn a_deny_rule_for_one_bash_command_rejects_that_call() {
         let world = permission_world_with(
             r#"{ "defaultPolicy": { "tools": "allow", "bash": "allow", "mcp": "allow", "skills": "allow" },
-                 "bash": { "echo *": "deny" } }"#,
+                 "bash": { "touch *": "deny" } }"#,
         );
-        let (_runtime, _requests, answer, _tmp) = probe_script(world, BASH_PROBE, |_| {}).await;
-        let outcome = answer["outcome"].as_str().unwrap();
+        let probe = probe_bash(world, |_| {}).await;
         assert!(
-            outcome.starts_with("threw: ") && outcome.contains("policy-enforced"),
-            "{answer}"
+            probe.bash_is_error,
+            "a command-level deny is an error result: {:?}",
+            probe.bash_result
         );
-        assert!(!outcome.starts_with("ran: "), "the command ran: {answer}");
+        assert!(
+            !probe.command_ran(),
+            "the command ran: {:?}",
+            probe.bash_result
+        );
+        assert!(
+            probe.bash_result.contains("policy-enforced"),
+            "the block reason is not the policy's: {:?}",
+            probe.bash_result
+        );
     }
 
     /// An `ask` with no UI to answer it (this session is headless, like `-p` and `--mode json`)
-    /// becomes a block, and the script reads why: the call, that it came from a script, and what to
-    /// do about it.
+    /// becomes a block, and the result says why: the call, and what to do about it.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_headless_ask_rejects_the_nested_call_with_a_message_the_script_can_read() {
+    async fn a_headless_ask_blocks_the_call_with_a_reason_the_model_can_read() {
         let world = permission_world_with(
             r#"{ "defaultPolicy": { "tools": "allow", "bash": "ask", "mcp": "allow", "skills": "allow" } }"#,
         );
-        let (_runtime, _requests, answer, _tmp) = probe_script(world, BASH_PROBE, |_| {}).await;
-        assert_eq!(
-            answer["outcome"],
-            "threw: Running bash command 'echo reached-bash' requires approval, but no interactive UI is available (from codemode script). A script cannot answer an approval prompt without a UI: allow this call in the permission policy, or run interactively to be asked.",
-            "{answer}"
+        let probe = probe_bash(world, |_| {}).await;
+        assert!(
+            probe.bash_is_error,
+            "an unanswerable `ask` is an error result: {:?}",
+            probe.bash_result
+        );
+        assert!(
+            !probe.command_ran(),
+            "the command ran: {:?}",
+            probe.bash_result
+        );
+        assert!(
+            probe
+                .bash_result
+                .contains("requires approval, but no interactive UI is available."),
+            "the block reason does not name the missing UI: {:?}",
+            probe.bash_result
         );
     }
 
     /// `--exclude-tools bash`: the denylist bounds the registry the same way, with the rest of the
     /// allowlist intact.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn exclude_tools_bounds_the_registry_the_permission_gate_and_codemode_reach() {
-        let (runtime, requests, answer, _tmp) = probe_allowlist(|cfg| {
+    async fn exclude_tools_bounds_the_registry_the_permission_gate_reaches() {
+        let probe = probe_bash(permission_world(), |cfg| {
             cfg.exclude_tools = vec!["bash".into()];
             // `--tools` names `bash` too: the denylist wins over the allowlist (pi `_isAllowedTool`).
-            cfg.tools = Some(vec![
-                "read".into(),
-                "bash".into(),
-                "edit".into(),
-                "codemode".into(),
-            ]);
+            cfg.tools = Some(vec!["read".into(), "bash".into(), "edit".into()]);
         })
         .await;
-        let session = runtime.session().await;
+        let session = probe.runtime.session().await;
 
-        for request in &requests {
+        for request in &probe.requests {
             assert!(
                 !request.iter().any(|declared| declared == "bash"),
                 "`bash` was declared under --exclude-tools bash: {request:?}"
@@ -3046,15 +3078,14 @@ mod tests {
             !session.all_tools().iter().any(|row| row.name == "bash"),
             "`bash` is in the registry"
         );
-        assert_eq!(
-            answer["offered"]["bash"],
-            serde_json::json!(false),
-            "`tools.bash` is callable from a codemode script: {answer}"
+        assert!(
+            probe.bash_is_error && !probe.command_ran(),
+            "`bash` answered despite the denylist: {:?}",
+            probe.bash_result
         );
-        assert_eq!(
-            answer["offered"]["edit"],
-            serde_json::json!(true),
-            "{answer}"
+        assert!(
+            session.all_tools().iter().any(|row| row.name == "edit"),
+            "the denylist took more than it names"
         );
     }
 
@@ -3097,15 +3128,17 @@ mod tests {
 
     /// [`first_request_in`] in the world the process environment makes.
     async fn first_request(policy: &str, settings: Option<&str>) -> FirstRequest {
-        first_request_in(policy, settings, false).await
+        first_request_in(policy, settings, false, |_| {}).await
     }
 
     /// The first request of a session over `policy`, with the subagents extension installed by file
-    /// when `subagents` is set (`CYRUP_SUBAGENTS=1` installs it from the environment too).
+    /// when `subagents` is set (`CYRUP_SUBAGENTS=1` installs it from the environment too) and the
+    /// launch flags `configure` sets.
     async fn first_request_in(
         policy: &str,
         settings: Option<&str>,
         subagents: bool,
+        configure: impl FnOnce(&mut SessionConfig),
     ) -> FirstRequest {
         let (tmp, agent_dir, cwd) = permission_world_with(policy);
         if let Some(settings) = settings {
@@ -3115,7 +3148,8 @@ mod tests {
             install_subagents(&agent_dir);
         }
         let requests: Requests = Arc::default();
-        let (factory, target) = factory_with(recording(&requests), &agent_dir, &cwd, false, |_| {});
+        let (factory, target) =
+            factory_with(recording(&requests), &agent_dir, &cwd, false, configure);
         let runtime = AgentSessionRuntime::create(factory, target).await.unwrap();
         let session = runtime.session().await;
         let _ = session.prompt("go").await.unwrap();
@@ -3177,7 +3211,7 @@ mod tests {
     /// The first prompt of a session with an armed permission system is the prompt of the tools the
     /// first request declares. The system prompt the model was sent listed six tools and the rules
     /// for them (`Use bash for file operations like ls, rg, find`) while the request declared twelve,
-    /// including `codemode`, because the permission system returned a sanitized copy of the prompt
+    /// including `tool_search`, because the permission system returned a sanitized copy of the prompt
     /// it was handed, built before it changed the active tools.
     ///
     /// "The tools the request declares" is pi's rule, which lists the declared tools that carry a
@@ -3202,13 +3236,20 @@ mod tests {
             without_snippet(&first)
         );
         assert!(
-            first.declared.iter().any(|name| name == "codemode"),
-            "codemode is active under this policy: {:?}",
+            first.declared.iter().any(|name| name == "tool_search"),
+            "tool_search is active under this policy: {:?}",
+            first.declared
+        );
+        // **[CYRUP-DELTA]** this fork ships no `codemode` tool (docs/LEAN-FORK-PLAN.md): neither the
+        // request declares one nor does the prompt describe one.
+        assert!(
+            !first.declared.iter().any(|name| name == "codemode"),
+            "a codemode tool is declared: {:?}",
             first.declared
         );
         assert!(
-            prompt.contains("Use codemode to batch independent tool calls"),
-            "the codemode rule is missing from:\n{prompt}"
+            !prompt.contains("codemode"),
+            "the prompt still describes codemode:\n{prompt}"
         );
         assert!(
             !prompt.contains("Use bash for file operations like ls, rg, find"),
@@ -3216,46 +3257,56 @@ mod tests {
         );
     }
 
-    /// The same under `codemode.mode: only`, where the request declares `codemode` and
-    /// `tool_search` alone: the prompt described `read`, `bash`, `edit` and `write` to a model that
-    /// was not given them, and never mentioned `codemode`.
-    ///
-    /// "Alone" is of the built-in tools. The subagents extension keeps its `subagents_enable` loader
-    /// active in every mode, so that a session cannot be left with no way to enable `subagent`
-    /// (`before_agent_start_loader_edit`, pi `tool-activation.ts:138-145`): the loader is declared
-    /// exactly when the extension is registered, and nothing else is.
+    /// The tools `--exclude-tools` takes away in the narrowed-set tests: everything but `read` that
+    /// carries a prompt rule, so a rule surviving in the prompt means the rule set and the declared
+    /// set disagree.
+    const NARROW_OUT: [&str; 6] = ["bash", "edit", "write", "find", "ls", "grep"];
+
+    /// `cfg.exclude_tools = NARROW_OUT`.
+    fn narrow_out(cfg: &mut SessionConfig) {
+        cfg.exclude_tools = NARROW_OUT.iter().map(|name| (*name).to_string()).collect();
+    }
+
+    /// The same over a narrowed tool set — `--exclude-tools` where pi used `codemode.mode: only` —
+    /// where the request declares `read` and none of the file tools: a prompt describing `bash`,
+    /// `edit` and `write` to a model that was not given them is stale, whatever narrowed the set.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn the_first_prompt_under_codemode_only_lists_only_what_the_request_declares() {
-        let first = first_request(
-            POLICY_SKILLS_ASK,
-            Some(r#"{ "codemode": { "mode": "only" } }"#),
-        )
-        .await;
+    async fn the_first_prompt_of_a_narrowed_tool_set_lists_only_what_the_request_declares() {
+        let first = first_request_in(POLICY_SKILLS_ASK, None, false, narrow_out).await;
         let prompt = &first.prompt;
-        let loader = "subagents_enable".to_string();
-        let mut expected = vec!["codemode".to_string(), "tool_search".to_string()];
-        if first.registered.contains(&loader) {
-            expected.push(loader);
+        for name in NARROW_OUT {
+            assert!(
+                !first.declared.iter().any(|declared| declared == name),
+                "`{name}` is declared under --exclude-tools: {:?}",
+                first.declared
+            );
         }
-        expected.sort();
-        assert_eq!(first.declared, expected, "{prompt}");
+        assert!(
+            first.declared.iter().any(|name| name == "read"),
+            "the tool the flags left is declared: {:?}",
+            first.declared
+        );
+        assert!(
+            first.registered.iter().any(|name| name == "read"),
+            "the declared tool is registered too: {:?}",
+            first.registered
+        );
         let mut listed = listed_tools(prompt);
         listed.sort();
         assert_eq!(
             listed, first.with_snippet,
             "the <tools> section of:\n{prompt}"
         );
-        for stale in [
-            "Use read to examine",
-            "Use bash for",
-            "Use edit for",
-            "Use write only",
-        ] {
+        assert!(
+            prompt.contains("Use read to examine"),
+            "the rule for the tool that survives is missing from:\n{prompt}"
+        );
+        for stale in ["Use bash for", "Use edit for", "Use write only"] {
             assert!(!prompt.contains(stale), "`{stale}` is stale in:\n{prompt}");
         }
         assert!(
-            prompt.contains("Use codemode to batch independent tool calls"),
-            "the codemode rule is missing from:\n{prompt}"
+            !prompt.contains("codemode"),
+            "the prompt still describes codemode:\n{prompt}"
         );
     }
 
@@ -3265,7 +3316,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn with_the_subagents_extension_installed_the_prompt_lists_the_tools_that_have_a_snippet()
     {
-        let first = first_request_in(POLICY_SKILLS_ASK, None, true).await;
+        let first = first_request_in(POLICY_SKILLS_ASK, None, true, |_| {}).await;
         for name in ["subagent", "bg_wait", "subagents_enable"] {
             assert!(
                 first.declared.iter().any(|n| n == name),
@@ -3291,24 +3342,33 @@ mod tests {
         );
     }
 
-    /// …and under `codemode.mode: only` the loader stays, and nothing else joins it.
+    /// …and narrowing the built-ins takes nothing from the subagents extension: its loader and its
+    /// two tools stay declared, and the prompt still lists only the tools that carry a snippet.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn with_the_subagents_extension_installed_codemode_only_keeps_the_loader() {
-        let first = first_request_in(
-            POLICY_SKILLS_ASK,
-            Some(r#"{ "codemode": { "mode": "only" } }"#),
-            true,
-        )
-        .await;
-        assert_eq!(
-            first.declared,
-            ["codemode", "subagents_enable", "tool_search"],
-            "{}",
-            first.prompt
+    async fn with_the_subagents_extension_installed_a_narrowed_tool_set_keeps_the_loader() {
+        let first = first_request_in(POLICY_SKILLS_ASK, None, true, narrow_out).await;
+        assert!(
+            first.declared.contains(&"subagents_enable".to_string()),
+            "the loader is dropped with the built-ins: {:?}",
+            first.declared
         );
+        for name in ["subagent", "bg_wait"] {
+            assert!(
+                first.declared.iter().any(|declared| declared == name),
+                "`{name}` is dropped with the built-ins: {:?}",
+                first.declared
+            );
+        }
+        for name in NARROW_OUT {
+            assert!(
+                !first.declared.iter().any(|declared| declared == name),
+                "`{name}` is declared under --exclude-tools: {:?}",
+                first.declared
+            );
+        }
         let mut listed = listed_tools(&first.prompt);
         listed.sort();
-        assert_eq!(listed, first.declared, "{}", first.prompt);
+        assert_eq!(listed, first.with_snippet, "{}", first.prompt);
     }
 
     /// A caller that names a disallowed built-in to `set_active_tools_by_name` (the CLI/host path

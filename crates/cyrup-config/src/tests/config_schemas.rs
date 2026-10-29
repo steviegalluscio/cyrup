@@ -371,7 +371,6 @@ fn settings_schema_rejects_values_runtime_accessors_reject() {
         json!({ "httpIdleTimeoutMs": "bogus" }),
         json!({ "websocketConnectTimeoutMs": -1 }),
         json!({ "websocketConnectTimeoutMs": "30000" }),
-        json!({ "codemode": { "inlineBudget": -1 } }),
     ] {
         assert!(!v.is_valid(&invalid), "accepted {invalid}");
     }
@@ -383,7 +382,6 @@ fn settings_schema_rejects_values_runtime_accessors_reject() {
         },
         "httpIdleTimeoutMs": 0,
         "websocketConnectTimeoutMs": "disabled",
-        "codemode": { "inlineBudget": 0 },
     });
     assert!(v.is_valid(&valid), "{:?}", errors(&v, &valid));
 }
@@ -482,7 +480,6 @@ fn settings_schema_defaults_are_the_getter_defaults() {
         p["retry"]["properties"]["provider"]["properties"]["maxRetryDelayMs"]["default"],
         60000
     );
-    assert_eq!(p["codemode"]["properties"]["inlineBudget"]["default"], 3000);
     assert_eq!(p["fullscreenWheelScrollLines"]["default"], "auto");
     assert_eq!(
         p["markdown"]["properties"]["mermaid"]["default"],
@@ -605,10 +602,6 @@ const DELIBERATELY_INVALID_SETTINGS_FIXTURES: &[(&str, &str)] = &[
     (
         r#"{"defaultTools":"grep"}"#,
         "a non-array reads back as unset",
-    ),
-    (
-        r#"{"codemode":{"mode":"only","inlineBudget":"x"}}"#,
-        "budget reads back as 3000",
     ),
     (r#"{"npmCommand":null}"#, "reads back as unset"),
     (r#"{"cacheWarming":"sometimes"}"#, "reads back as streaming"),

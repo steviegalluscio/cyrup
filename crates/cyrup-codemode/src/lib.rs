@@ -1,20 +1,16 @@
-//! `cyrup-codemode` — the engine-independent half of pi's `codemode` (gap-analysis area 18,
-//! `docs/gap-analysis/18-pi-codemode.md`).
+//! `cyrup-codemode` — the engine-independent pieces pi's `codemode` and `tool_search` share
+//! (gap-analysis area 18, `docs/gap-analysis/18-pi-codemode.md`).
 //!
-//! `codemode` lets a model write one JavaScript program that calls tools instead of making one tool
-//! call per turn. The JavaScript engine is a separate crate's concern; everything a script's author
-//! and the model-facing description need *before* an engine runs lives here, and none of it knows
-//! an engine exists:
+//! **[CYRUP-DELTA]** this fork does not ship the `codemode` tool (docs/LEAN-FORK-PLAN.md), so what
+//! remains here is what the live consumers — `cyrup-tool-search` and `cyrup-mcp` — actually use:
+//! the BM25 ranker, the identifier/sanitiser, the script-source shape, and the JavaScript string,
+//! number and key-order semantics they all compute with. None of it knows an engine exists.
 //!
 //! | module | upstream @v1.0.1 | ledger |
 //! |---|---|---|
 //! | [`identifier`] | `packages/codemode/src/identifier.ts` | CODE-004 |
 //! | [`source`] | `packages/codemode/src/source.ts` | CODE-003 |
-//! | [`declarations`] | `packages/codemode/src/declarations.ts` | CODE-004 |
 //! | [`rank`] | `packages/coding-agent/src/extensions/tool-search/tool.ts` | CODE-010 |
-//! | [`discovery`] | `packages/coding-agent/src/extensions/codemode/execute.ts:437-517` | CODE-010 |
-//! | [`output`] | `packages/coding-agent/src/extensions/codemode/execute.ts:232-300` | CODE-012 |
-//! | [`types`] | `packages/codemode/src/types.ts` | CODE-004 |
 //!
 //! # Byte parity with JavaScript
 //!
@@ -26,11 +22,7 @@
 
 #![forbid(unsafe_code)]
 
-pub mod declarations;
-pub mod discovery;
 pub mod identifier;
 pub mod js;
-pub mod output;
 pub mod rank;
 pub mod source;
-pub mod types;

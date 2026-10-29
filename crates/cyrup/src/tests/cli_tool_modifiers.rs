@@ -2,11 +2,13 @@
 //! driven through the real CLI pipeline (`main.rs`'s order: short-alias normalization →
 //! `apply_arg_leniency` → `partition_extension_flags` → clap → `normalize_list_flags` →
 //! `to_session_config`) into the real `session_launch::build_factory`, which attaches the native
-//! extensions (`codemode` among them) exactly as every mode arm does.
+//! extensions (`tool_search` among them) exactly as every mode arm does.
 //!
 //! pi v1.1.0 (`ddaa0a034`) applies a modifier-only list to the default selection
 //! (`core/sdk.ts:280-294` @f1b2e77f5) — `--help` documents `pi --tools +codemode` as "Add codemode to
-//! the default tools" (`cli/args.ts:405-406`) — and refuses a mixed or patterned list with the error
+//! the default tools" (`cli/args.ts:405-406`); this fork's stand-in is `+tool_search`, the same
+//! registered-inactive built-in shape (`codemode` is not shipped here, docs/LEAN-FORK-PLAN.md) —
+//! and refuses a mixed or patterned list with the error
 //! diagnostic `${arg}: ${getToolListError(tools)}` (`args.ts:151-161`). RED before the fix: every
 //! modifier case started with NO tools (`+codemode` was an allowlist of one unknown name), and
 //! `-t -bash` died in clap.
@@ -97,8 +99,8 @@ fn sorted(names: &[&str]) -> Vec<String> {
 
 /// The SEAM-148 Verify line, case by case: `--tools +grep` starts with `read,bash,edit,write,grep`;
 /// `--tools=-bash` and `-t -bash` start with `read,edit,write`; `--tools read` is unchanged;
-/// `--no-tools --tools +read` gives an allowlist of exactly `read`. Plus pi's own `--help`
-/// example, `--tools +codemode`.
+/// `--no-tools --tools +read` gives an allowlist of exactly `read`. Plus the registered-inactive
+/// built-in case — pi's `--help` example is `--tools +codemode`; this fork runs `+tool_search`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_modifier_tools_flag_adjusts_the_tools_the_session_starts_with() {
     // The baseline the modifiers apply to: pi's four built-ins plus whatever the always-attached
@@ -120,7 +122,7 @@ async fn a_modifier_tools_flag_adjusts_the_tools_the_session_starts_with() {
         with_extensions(&["read", "bash", "edit", "write"])
     );
     assert!(
-        !extension_tools.contains(&"codemode") && !extension_tools.contains(&"grep"),
+        !extension_tools.contains(&"tool_search") && !extension_tools.contains(&"grep"),
         "{baseline:?}"
     );
 
@@ -129,8 +131,8 @@ async fn a_modifier_tools_flag_adjusts_the_tools_the_session_starts_with() {
         with_extensions(&["read", "bash", "edit", "write", "grep"])
     );
     assert_eq!(
-        started_with(&["--tools", "+codemode"]).await,
-        with_extensions(&["read", "bash", "edit", "write", "codemode"])
+        started_with(&["--tools", "+tool_search"]).await,
+        with_extensions(&["read", "bash", "edit", "write", "tool_search"])
     );
     assert_eq!(
         started_with(&["--tools=-bash"]).await,

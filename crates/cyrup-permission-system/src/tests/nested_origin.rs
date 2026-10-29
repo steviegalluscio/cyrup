@@ -1,6 +1,6 @@
-//! A gated call that another tool made while it ran (`ctx.executeTool`, a `codemode` script's
-//! `tools.bash(...)`) passes the same gate as a model-issued one, but its prompt, its headless block
-//! reason and its audit entry say where it came from.
+//! A gated call that another tool made while it ran (`ctx.executeTool`) passes the same gate as a
+//! model-issued one, but its prompt, its headless block reason and its audit entry say where it came
+//! from.
 //!
 //! **[CYRUP-DELTA]** pi-permission-system v0.8.0 predates nested calls (`parentToolCallId`); its
 //! prompts read the same for both. The labels are cyrup's, so these tests pin cyrup's wording.
@@ -31,7 +31,7 @@ use crate::{
 struct Registry;
 impl HostServices for Registry {
     fn all_tool_names(&self) -> Option<Vec<String>> {
-        Some(vec!["codemode".to_string(), "bash".to_string()])
+        Some(vec!["orchestrator".to_string(), "bash".to_string()])
     }
 }
 
@@ -61,13 +61,13 @@ fn block_on<F: std::future::Future>(child: bool, body: F) -> F::Output {
         .block_on(body)
 }
 
-/// `bash` asks; everything else is allowed, so the parent `codemode` call itself is not prompted.
+/// `bash` asks; everything else is allowed, so the parent `orchestrator` call itself is not prompted.
 async fn ext_with_recording_channel(
     agent_dir: &Path,
 ) -> (PermissionSystemExtension, Arc<Mutex<Vec<String>>>) {
     ext_with_policy(
         agent_dir,
-        r#"{ "tools": { "codemode": "allow" }, "bash": { "*": "ask" } }"#,
+        r#"{ "tools": { "orchestrator": "allow" }, "bash": { "*": "ask" } }"#,
     )
     .await
 }
@@ -134,15 +134,15 @@ fn bash(command: &str) -> Value {
 }
 
 #[test]
-fn a_nested_ask_prompt_names_the_codemode_script_and_a_direct_one_does_not() {
+fn a_nested_ask_prompt_names_the_calling_tool_and_a_direct_one_does_not() {
     block_on(true, async {
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path().to_path_buf();
         let (ext, prompts) = ext_with_recording_channel(&cwd).await;
-        // The model issues `codemode`; its script then calls `bash` as `<id>/1`.
+        // The model issues `orchestrator`; that call then makes a nested `bash` call as `<id>/1`.
         let parent = ext
             .on_event(
-                &call("call-1", "codemode", json!({ "code": "x" })),
+                &call("call-1", "orchestrator", json!({ "code": "x" })),
                 &ctx(&cwd),
             )
             .await;
@@ -165,12 +165,12 @@ fn a_nested_ask_prompt_names_the_codemode_script_and_a_direct_one_does_not() {
         let shown = prompts.lock().unwrap().clone();
         assert_eq!(shown.len(), 2, "{shown:?}");
         assert!(
-            shown[0].ends_with("(from codemode script)"),
+            shown[0].ends_with("(from a nested call of tool 'orchestrator')"),
             "the nested prompt must say where the call came from: {}",
             shown[0]
         );
         assert!(
-            !shown[1].contains("from codemode script"),
+            !shown[1].contains("from a nested call of tool 'orchestrator'"),
             "a direct call's prompt is unchanged: {}",
             shown[1]
         );
@@ -199,7 +199,7 @@ fn a_headless_nested_ask_blocks_with_a_reason_a_script_can_act_on() {
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path().to_path_buf();
         let (ext, prompts) = ext_with_recording_channel(&cwd).await;
-        ext.on_event(&call("call-1", "codemode", json!({})), &ctx(&cwd))
+        ext.on_event(&call("call-1", "orchestrator", json!({})), &ctx(&cwd))
             .await;
         let nested = ext
             .on_event(
@@ -213,7 +213,7 @@ fn a_headless_nested_ask_blocks_with_a_reason_a_script_can_act_on() {
         let reason = reason.unwrap();
         assert_eq!(
             reason,
-            "Running bash command 'ls' requires approval, but no interactive UI is available (from codemode script). A script cannot answer an approval prompt without a UI: allow this call in the permission policy, or run interactively to be asked."
+            "Running bash command 'ls' requires approval, but no interactive UI is available (from a nested call of tool 'orchestrator'). A nested call cannot answer an approval prompt without a UI: allow this call in the permission policy, or run interactively to be asked."
         );
         let direct = ext
             .on_event(&call("call-2", "bash", bash("ls")), &ctx(&cwd))
@@ -236,7 +236,7 @@ fn the_audit_entry_of_a_nested_decision_names_the_call_that_made_it() {
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path().to_path_buf();
         let (ext, _) = ext_with_recording_channel(&cwd).await;
-        ext.on_event(&call("call-1", "codemode", json!({})), &ctx(&cwd))
+        ext.on_event(&call("call-1", "orchestrator", json!({})), &ctx(&cwd))
             .await;
         ext.on_event(
             &call("call-1/1", "bash", bash("ls")),
@@ -262,7 +262,7 @@ fn the_audit_entry_of_a_nested_decision_names_the_call_that_made_it() {
             nested["prompt"]
                 .as_str()
                 .unwrap()
-                .ends_with("(from codemode script)"),
+                .ends_with("(from a nested call of tool 'orchestrator')"),
             "{nested}"
         );
         let direct = entries
@@ -276,22 +276,22 @@ fn the_audit_entry_of_a_nested_decision_names_the_call_that_made_it() {
     });
 }
 
-/// With `ask` on `codemode` itself there are two prompt layers: one to run the script, then one per
+/// With `ask` on `orchestrator` itself there are two prompt layers: one to run the script, then one per
 /// nested call that resolves to `ask`. Neither answer covers the other, and only the second says it
 /// came from a script. (The policy semantics are unchanged: each call is gated by its own rule.)
 #[test]
-fn an_ask_on_codemode_and_on_bash_prompts_twice_and_only_the_nested_prompt_is_labelled() {
+fn an_ask_on_orchestrator_and_on_bash_prompts_twice_and_only_the_nested_prompt_is_labelled() {
     block_on(true, async {
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path().to_path_buf();
         let (ext, prompts) = ext_with_policy(
             &cwd,
-            r#"{ "tools": { "codemode": "ask" }, "bash": { "*": "ask" } }"#,
+            r#"{ "tools": { "orchestrator": "ask" }, "bash": { "*": "ask" } }"#,
         )
         .await;
         let run = ext
             .on_event(
-                &call("call-1", "codemode", json!({ "code": "x" })),
+                &call("call-1", "orchestrator", json!({ "code": "x" })),
                 &ctx(&cwd),
             )
             .await;
@@ -306,10 +306,14 @@ fn an_ask_on_codemode_and_on_bash_prompts_twice_and_only_the_nested_prompt_is_la
         let shown = prompts.lock().unwrap().clone();
         assert_eq!(shown.len(), 2, "one prompt per layer: {shown:?}");
         assert!(
-            shown[0].contains("codemode") && !shown[0].contains("from codemode script"),
+            shown[0].contains("orchestrator")
+                && !shown[0].contains("from a nested call of tool 'orchestrator'"),
             "{shown:?}"
         );
-        assert!(shown[1].ends_with("(from codemode script)"), "{shown:?}");
+        assert!(
+            shown[1].ends_with("(from a nested call of tool 'orchestrator')"),
+            "{shown:?}"
+        );
     });
 }
 
@@ -370,7 +374,7 @@ struct LockedRegistry(Arc<HumanInteractionLock>);
 
 impl HostServices for LockedRegistry {
     fn all_tool_names(&self) -> Option<Vec<String>> {
-        Some(vec!["codemode".to_string(), "bash".to_string()])
+        Some(vec!["orchestrator".to_string(), "bash".to_string()])
     }
     fn human_interaction_lock(&self) -> Option<Arc<HumanInteractionLock>> {
         Some(Arc::clone(&self.0))
@@ -392,7 +396,7 @@ async fn ext_asking(
     };
     let paths = policy_paths(
         agent_dir,
-        r#"{ "tools": { "codemode": "allow" }, "bash": { "*": "ask" } }"#,
+        r#"{ "tools": { "orchestrator": "allow" }, "bash": { "*": "ask" } }"#,
     );
     let ext = extension_over(
         paths,
@@ -419,7 +423,7 @@ fn the_dialog_of_a_nested_call_offers_to_reject_the_whole_script_and_a_direct_on
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path().to_path_buf();
         let (ext, seen) = ext_asking(&cwd, Vec::new(), Duration::ZERO).await;
-        ext.on_event(&call("call-1", "codemode", json!({})), &ctx(&cwd))
+        ext.on_event(&call("call-1", "orchestrator", json!({})), &ctx(&cwd))
             .await;
         ext.on_event(
             &call("call-1/1", "bash", bash("ls")),
@@ -446,9 +450,9 @@ fn rejecting_the_script_refuses_its_later_calls_without_asking_and_no_other_scri
         let dir = tempfile::tempdir().unwrap();
         let cwd = dir.path().to_path_buf();
         let (ext, seen) = ext_asking(&cwd, vec![Answer::RejectScript], Duration::ZERO).await;
-        ext.on_event(&call("call-1", "codemode", json!({})), &ctx(&cwd))
+        ext.on_event(&call("call-1", "orchestrator", json!({})), &ctx(&cwd))
             .await;
-        ext.on_event(&call("call-9", "codemode", json!({})), &ctx(&cwd))
+        ext.on_event(&call("call-9", "orchestrator", json!({})), &ctx(&cwd))
             .await;
 
         let first = ext
@@ -500,7 +504,7 @@ fn rejecting_the_script_reaches_the_calls_already_waiting_for_their_turn() {
         let cwd = dir.path().to_path_buf();
         let (ext, seen) =
             ext_asking(&cwd, vec![Answer::RejectScript], Duration::from_millis(80)).await;
-        ext.on_event(&call("call-1", "codemode", json!({})), &ctx(&cwd))
+        ext.on_event(&call("call-1", "orchestrator", json!({})), &ctx(&cwd))
             .await;
 
         let nested = |n: u32| {
@@ -576,7 +580,7 @@ fn terminate_of(outcome: &HookOutcome) -> TerminateHint {
 
 /// PERM-046: the refusal that rejects the script, and every later refusal of that script's calls,
 /// is a block that asks for the caller to stop ([`TerminateHint::Terminate`], pi's
-/// `ToolCallEventResult.terminate`). A nested call's caller is the script, and the `codemode` tool
+/// `ToolCallEventResult.terminate`). A nested call's caller is the script, and the `orchestrator` tool
 /// ends the script on it. A plain "Reject" of a script's call says nothing of the kind, so the
 /// script goes on; nor does any refusal of a call the model made, which would end the agent's turn.
 #[test]
@@ -590,7 +594,7 @@ fn rejecting_the_script_asks_the_caller_to_stop_and_a_plain_reject_does_not() {
             Duration::ZERO,
         )
         .await;
-        ext.on_event(&call("call-1", "codemode", json!({})), &ctx(&cwd))
+        ext.on_event(&call("call-1", "orchestrator", json!({})), &ctx(&cwd))
             .await;
 
         let plain = ext

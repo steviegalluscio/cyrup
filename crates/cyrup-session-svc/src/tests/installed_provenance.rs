@@ -303,48 +303,6 @@ async fn a_models_json_override_of_an_embedders_model_reaches_the_streaming_prov
     );
 }
 
-/// SEAM-173, done-means (3) — the third view. Codemode's registry (`compose_codemode_models`,
-/// the installed provider set LAST over the composed built-ins) lists for the embedder's id what
-/// `/model` lists, and the provider it holds for the id streams the added model as itself. RED at
-/// `a07a0e34`: codemode listed `["embedder-only"]` (the raw provider replaced the composed
-/// `anthropic`) while `/model` listed `["embedder-only", "json-added"]`.
-#[tokio::test]
-async fn codemode_lists_what_model_lists_for_an_embedders_id() {
-    let fx = fixture();
-    write_models_json(
-        &fx,
-        serde_json::json!({ "anthropic": {
-            "models": [{ "id": "json-added", "name": "Json Added" }]
-        } }),
-    );
-    let requested = Arc::new(Mutex::new(Vec::new()));
-    let session = session_on(&fx, embedders_anthropic(Arc::clone(&requested))).await;
-
-    let model_view = ids_of(&session.full_model_catalog(), "anthropic");
-    let codemode = session.codemode_models_now();
-    let codemode_view = ids_of(&codemode.get_models(Some("anthropic")), "anthropic");
-    assert_eq!(
-        model_view,
-        vec!["embedder-only".to_string(), "json-added".to_string()],
-        "/model"
-    );
-    assert_eq!(codemode_view, model_view, "codemode agrees with /model");
-
-    let added = codemode.get_model("anthropic", "json-added").unwrap();
-    requested.lock().unwrap().clear();
-    let _: Vec<_> = codemode
-        .get_provider("anthropic")
-        .unwrap()
-        .stream(&added, &Context::default(), &StreamOptions::default())
-        .collect()
-        .await;
-    assert_eq!(
-        requested.lock().unwrap().as_slice(),
-        ["json-added".to_string()],
-        "codemode's provider streams the added model as itself"
-    );
-}
-
 /// GUARD (control, green at `a07a0e34` and after) — an embedder's provider under an id
 /// `models.json` does NOT mention is stored as given: the composition is a layer over the
 /// provider, not a replacement of it, so with no block there is nothing to compose.

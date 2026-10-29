@@ -1,8 +1,8 @@
 //! Tool discovery: a BM25 ranker over tool metadata (pi
 //! `packages/coding-agent/src/extensions/tool-search/tool.ts` @v1.0.1, CODE-010).
 //!
-//! Shared by `searchTools()` in `codemode` scripts ([`crate::discovery::search_tools`]) and the
-//! `tool_search` tool, which each build [`ToolSearchDocument`]s with
+//! Used by the `tool_search` tool (and, in pi, by `searchTools()` in `codemode` scripts, which
+//! this fork does not ship), which builds [`ToolSearchDocument`]s with
 //! [`create_tool_search_document`] and rank them with [`Bm25Ranker`]. Scoring is bit-for-bit
 //! upstream's: same tokeniser, same `k1`/`b`, same summation order, and `ln` taken from [`math_log`], the
 //! fdlibm port that V8's `Math.log` is, so scores are the doubles pi computes.

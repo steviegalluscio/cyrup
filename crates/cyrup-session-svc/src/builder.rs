@@ -607,9 +607,6 @@ pub struct SessionBuilder {
     settings_store: Arc<dyn SettingsStore>,
     auth: Option<Arc<AuthStore>>,
     native_extensions: Vec<Arc<dyn NativeExtension>>,
-    /// Where the `codemode` extension finds the session it runs in. Set by [`Self::with_codemode`]
-    /// or [`Self::codemode_host_slot`]; each built session binds its own host into it.
-    codemode_host_slot: Option<cyrup_codemode_runtime::tool::CodemodeHostSlot>,
     cli_settings: Settings,
     /// A pre-built session manager to adopt instead of opening/creating one from `config.target`
     /// (Pi `createAgentSessionFromServices` with a caller-supplied `sessionManager`,
@@ -739,7 +736,6 @@ impl SessionBuilder {
             settings_store: Arc::new(InMemorySettingsStore::new()),
             auth: None,
             native_extensions: Vec::new(),
-            codemode_host_slot: None,
             cli_settings: Settings::new(),
             prebuilt_manager: None,
             provider_resolver: None,
@@ -912,28 +908,6 @@ impl SessionBuilder {
     #[must_use]
     pub fn with_native_extension(mut self, ext: Arc<dyn NativeExtension>) -> Self {
         self.native_extensions.push(ext);
-        self
-    }
-
-    /// Register the built-in `codemode` extension (pi's `builtin:codemode`, `extensions/index.ts:9-14`
-    /// @v1.0.1): the extension is loaded like any native built-in, and each session built from this
-    /// builder is bound into the extension's host slot, so the tool it registers can call tools,
-    /// replay the branch's `store()` entries and reach the model registry as pi's `ctx` lets it.
-    #[must_use]
-    pub fn with_codemode(self, ext: cyrup_codemode_runtime::CodemodeExtension) -> Self {
-        let slot = ext.host().clone();
-        self.with_native_extension(Arc::new(ext))
-            .codemode_host_slot(slot)
-    }
-
-    /// Bind each built session into `slot`, for a codemode extension that is already registered
-    /// through [`Self::with_native_extension`] (what [`crate::SessionFactory`] does per build).
-    #[must_use]
-    pub fn codemode_host_slot(
-        mut self,
-        slot: cyrup_codemode_runtime::tool::CodemodeHostSlot,
-    ) -> Self {
-        self.codemode_host_slot = Some(slot);
         self
     }
 
@@ -1532,23 +1506,6 @@ impl SessionBuilder {
         // built-ins (permission-system, intercom), so anything short of a non-zero exit would turn
         // a failed permission gate into a fail-OPEN session.
         let mut native_load_errors: Vec<crate::services::ExtensionLoadDiagnostic> = Vec::new();
-        // The `codemode` tool's `prepare_loadout` hook reads `codemode.mode` / `codemode.inlineBudget`
-        // while the loadout is resolved (below), long before the session is shared, so its host
-        // exists from here with the settings this session was built with. `into_shared` attaches the
-        // session itself. Pi reads the same two settings from `pi.getSettings()` at hook time
-        // (`extensions/codemode/index.ts:22-29` @v1.0.1); a session's settings are fixed until
-        // `/reload` rebuilds it, so reading them once is the same value.
-        let codemode_host = self.codemode_host_slot.as_ref().map(|slot| {
-            let eff = settings.effective();
-            let host = Arc::new(crate::session::SessionCodemodeHost::new(
-                crate::session::CodemodeSettings {
-                    mode: eff.codemode_mode(),
-                    inline_budget: eff.codemode_inline_budget(),
-                },
-            ));
-            slot.bind(host.clone());
-            host
-        });
         // SEAM-071: `--no-extensions` gates the AMBIENT natives too. It used to gate only the
         // WASM/disk discovery roots (`extension_discovery_roots`), while this loop loaded every
         // native unconditionally — so `cyrup --no-extensions` still started an intercom broker,
@@ -1558,19 +1515,8 @@ impl SessionBuilder {
         // (`resource-loader.ts:451-452`, `:555-557` @v0.83.0). It does not touch pi's inline
         // `extensionFactories` tier, and neither does this — see `native_survives_no_extensions`.
         let is_subagent_child = std::env::var_os(SUBAGENT_CHILD_ENV).is_some();
-        let keeps_codemode = child_keeps_codemode(&cfg);
-        let codemode_available = native_extensions
-            .iter()
-            .any(|e| e.id().as_str() == cyrup_codemode_runtime::EXTENSION_ID);
-        let mut codemode_loaded = false;
-        for ext in natives_to_load(
-            native_extensions,
-            cfg.no_extensions,
-            is_subagent_child,
-            keeps_codemode,
-        ) {
+        for ext in natives_to_load(native_extensions, cfg.no_extensions, is_subagent_child) {
             let id = ext.id();
-            codemode_loaded |= id.as_str() == cyrup_codemode_runtime::EXTENSION_ID;
             if let Err(e) = host
                 .load_native_with_services(ext, native_services.clone())
                 .await
@@ -1585,10 +1531,6 @@ impl SessionBuilder {
                 });
             }
         }
-        native_load_errors.extend(codemode_skipped_diagnostic(
-            &cfg,
-            codemode_available && !codemode_loaded,
-        ));
         let ext_host = Arc::new(host);
 
         // ---- 5. resources discovery (cyrup-resources) — RUN FIRST (before disk-extension load) so
@@ -2976,7 +2918,6 @@ impl SessionBuilder {
             nested_calls,
             run_abort_requested,
             hooks: nested_hooks,
-            codemode_host,
         };
 
         let services = AgentSessionServices {
@@ -3479,10 +3420,9 @@ async fn pre_trust_extension_verdict(
     // either — pi's pre-trust pass (`loadProjectTrustExtensions()`) runs over the SAME reduced set
     // its main pass does, because both read `extensionPaths` (resource-loader.ts:451-455 @v0.83.0).
     let is_subagent_child = std::env::var_os(SUBAGENT_CHILD_ENV).is_some();
-    let voters = natives.iter().filter(|e| {
-        !cfg.no_extensions
-            || native_survives_no_extensions(e, is_subagent_child, child_keeps_codemode(cfg))
-    });
+    let voters = natives
+        .iter()
+        .filter(|e| !cfg.no_extensions || native_survives_no_extensions(e, is_subagent_child));
     for ext in voters.filter(|e| e.decides_project_trust()) {
         // A load failure in the throwaway pass must not fail the build — the real load at step 4b
         // surfaces it. Skip and keep polling the rest.
@@ -3598,11 +3538,7 @@ const SUBAGENT_CHILD_RUNTIME_NATIVES: [&str; 3] = [
 /// `loadFinalExtensionSet` calls `loadExtensionFactories` unconditionally (`resource-loader.ts:579-581`
 /// @v0.83.0) over `extensionFactories = [...builtInExtensions, ...(options?.extensionFactories ?? [])]`
 /// (`main.ts:523`), while only `extensionPaths` — the PATH tier — is collapsed by the flag (`:451-453`).
-fn native_survives_no_extensions(
-    ext: &Arc<dyn NativeExtension>,
-    is_subagent_child: bool,
-    keeps_codemode: bool,
-) -> bool {
+fn native_survives_no_extensions(ext: &Arc<dyn NativeExtension>, is_subagent_child: bool) -> bool {
     let id = ext.id();
     let id = id.as_str();
     // pi's inline-factory tier: never gated by a flag about discovery.
@@ -3610,57 +3546,8 @@ fn native_survives_no_extensions(
         return true;
     }
     // The ambient tier, plus pi's one carve-out: a subagent child keeps the extensions its launcher
-    // re-injects by path (see [`SUBAGENT_CHILD_RUNTIME_NATIVES`]), and `codemode` when the child's
-    // own `--tools` names it (see [`child_keeps_codemode`]).
-    is_subagent_child
-        && (SUBAGENT_CHILD_RUNTIME_NATIVES.contains(&id)
-            || (keeps_codemode && id == cyrup_codemode_runtime::EXTENSION_ID))
-}
-
-/// The startup diagnostic for a `codemode` the allowlist names but `--no-extensions` left unloaded.
-/// `--tools codemode` then names a tool that does not exist, and nothing said so: the model's first
-/// call came back "Tool codemode not found". Not fatal (the session is usable), so it travels on the
-/// `[Extension issues]` panel and not on the exit channel.
-///
-/// **[CYRUP-DELTA]** pi has no such diagnostic; its `builtin:codemode` is dropped just as silently
-/// (`package-manager.ts:972-974` @v1.0.1).
-fn codemode_skipped_diagnostic(
-    cfg: &SessionConfig,
-    skipped: bool,
-) -> Option<crate::services::ExtensionLoadDiagnostic> {
-    let id = cyrup_codemode_runtime::EXTENSION_ID;
-    (skipped && cyrup_core::tool_name_matches(cfg.tools.iter().flatten(), id)).then(|| {
-        crate::services::ExtensionLoadDiagnostic {
-            path: PathBuf::from(id),
-            error: format!(
-                "--tools names `{id}`, but --no-extensions skipped the built-in extension that provides it, so the tool does not exist in this session. Drop --no-extensions to use it."
-            ),
-            fatal: false,
-        }
-    })
-}
-
-/// Whether a subagent child under `--no-extensions` keeps the `codemode` built-in: its `--tools`
-/// allowlist names it (an exact name or a `*` pattern) and `--exclude-tools` does not.
-///
-/// **[CYRUP-DELTA]** `codemode` is an ambient built-in, so `--no-extensions` (which a subagent whose
-/// agent pins `extensions:` always gets) used to drop it silently even when the agent's `tools:`
-/// list named it. pi-subagents decides the same question from the child's tool list alone: its child
-/// session registers the host's codemode factory when `launch.tools` is unset or includes
-/// `"codemode"`, `codemode` is not in `excludeTools`, and the capability ceiling does not deny
-/// extensions (`src/runs/shared/child-session.ts` @HEAD `0c33ec7c`, from `8f90bf1b` "register Pi
-/// codemode in native child sessions", first in v0.74.0; the ledger pin v0.71.0 predates it).
-/// cyrup keeps only the explicit-name half: an unpinned child (`--tools` absent) gets its own
-/// default tool set, which does not include `codemode`, so nothing is gained by keeping it loaded.
-/// The `denyExtensions` half is the parent's: the spawn plan leaves `codemode` out of the `--tools`
-/// it hands a child under a ceiling that denies extensions (`exec/tool_surface.rs`), and this check
-/// reads that list.
-fn child_keeps_codemode(cfg: &SessionConfig) -> bool {
-    let id = cyrup_codemode_runtime::EXTENSION_ID;
-    cfg.tools
-        .as_ref()
-        .is_some_and(|tools| cyrup_core::tool_name_matches(tools, id))
-        && !cyrup_core::tool_name_matches(&cfg.exclude_tools, id)
+    // re-injects by path (see [`SUBAGENT_CHILD_RUNTIME_NATIVES`]).
+    is_subagent_child && SUBAGENT_CHILD_RUNTIME_NATIVES.contains(&id)
 }
 
 /// `natives` without the built-ins `disabled` names by id (pi `resourceLoaderOptions.
@@ -3689,7 +3576,6 @@ fn natives_to_load(
     natives: Vec<Arc<dyn NativeExtension>>,
     no_extensions: bool,
     is_subagent_child: bool,
-    keeps_codemode: bool,
 ) -> Vec<Arc<dyn NativeExtension>> {
     if !no_extensions {
         return natives;
@@ -3697,7 +3583,7 @@ fn natives_to_load(
     natives
         .into_iter()
         .filter(|e| {
-            let keep = native_survives_no_extensions(e, is_subagent_child, keeps_codemode);
+            let keep = native_survives_no_extensions(e, is_subagent_child);
             if !keep {
                 tracing::debug!(extension = %e.id(), "native built-in skipped: --no-extensions");
             }
@@ -4359,14 +4245,8 @@ mod tests {
     /// Without the flag nothing changes — the whole point is that this is a FLAG, not a policy.
     #[test]
     fn every_native_loads_without_no_extensions() {
-        assert_eq!(
-            ids(&super::natives_to_load(stubs(), false, false, false)).len(),
-            5
-        );
-        assert_eq!(
-            ids(&super::natives_to_load(stubs(), false, true, false)).len(),
-            5
-        );
+        assert_eq!(ids(&super::natives_to_load(stubs(), false, false)).len(), 5);
+        assert_eq!(ids(&super::natives_to_load(stubs(), false, true)).len(), 5);
     }
 
     /// `--no-mcp` is `disabledBuiltinExtensions: ["mcp"]` (`main.ts` @v1.0.4): the named built-in
@@ -4396,7 +4276,7 @@ mod tests {
     /// installed packages living in exactly that tier upstream.
     #[test]
     fn no_extensions_drops_every_ambient_native_in_a_root_session() {
-        let kept = ids(&super::natives_to_load(stubs(), true, false, false));
+        let kept = ids(&super::natives_to_load(stubs(), true, false));
         assert_eq!(
             kept,
             vec!["an-embedders-own-extension".to_string()],
@@ -4414,7 +4294,7 @@ mod tests {
     fn an_extension_the_embedder_passed_by_hand_survives_no_extensions() {
         for child in [false, true] {
             assert!(
-                ids(&super::natives_to_load(stubs(), true, child, false))
+                ids(&super::natives_to_load(stubs(), true, child))
                     .contains(&"an-embedders-own-extension".to_string()),
                 "inline tier survives (is_subagent_child={child})"
             );
@@ -4443,7 +4323,7 @@ mod tests {
         ] {
             for child in [false, true] {
                 assert!(
-                    super::native_survives_no_extensions(&inline_double(id), child, false),
+                    super::native_survives_no_extensions(&inline_double(id), child),
                     "a by-value extension named {id} is pi's inline tier and must load \
                      (is_subagent_child={child})"
                 );
@@ -4458,7 +4338,7 @@ mod tests {
     /// the permission system here would be a permission gate failing OPEN.
     #[test]
     fn a_subagent_child_keeps_exactly_the_natives_pi_re_injects() {
-        let kept = ids(&super::natives_to_load(stubs(), true, true, false));
+        let kept = ids(&super::natives_to_load(stubs(), true, true));
         assert_eq!(
             kept,
             vec![
@@ -4485,88 +4365,18 @@ mod tests {
         };
         for id in super::SUBAGENT_CHILD_RUNTIME_NATIVES {
             assert!(
-                super::native_survives_no_extensions(&one(id), true, false),
+                super::native_survives_no_extensions(&one(id), true),
                 "{id} survives in a child"
             );
             assert!(
-                !super::native_survives_no_extensions(&one(id), false, false),
+                !super::native_survives_no_extensions(&one(id), false),
                 "{id} drops at the root"
             );
         }
         assert!(!super::native_survives_no_extensions(
             &one("cyrup-intercom"),
-            true,
-            false
+            true
         ));
-    }
-
-    /// A subagent child whose `--tools` names `codemode` keeps the `codemode` built-in across
-    /// `--no-extensions` (an agent that pins `extensions:` always gets that flag); without the
-    /// name it is dropped as before, and a ROOT session never keeps it this way.
-    #[test]
-    fn a_subagent_child_keeps_codemode_across_no_extensions_only_when_its_tools_name_it() {
-        let stubs_with_codemode = || {
-            let mut all = stubs();
-            all.push(std::sync::Arc::new(StubNative(
-                cyrup_core::ExtensionId::from("codemode"),
-                true,
-            )));
-            all
-        };
-        let kept = ids(&super::natives_to_load(
-            stubs_with_codemode(),
-            true,
-            true,
-            true,
-        ));
-        assert!(kept.contains(&"codemode".to_string()), "kept: {kept:?}");
-        let dropped = ids(&super::natives_to_load(
-            stubs_with_codemode(),
-            true,
-            true,
-            false,
-        ));
-        assert!(
-            !dropped.contains(&"codemode".to_string()),
-            "kept: {dropped:?}"
-        );
-        let root = ids(&super::natives_to_load(
-            stubs_with_codemode(),
-            true,
-            false,
-            true,
-        ));
-        assert!(
-            !root.contains(&"codemode".to_string()),
-            "the carve-out is a subagent child's only: {root:?}"
-        );
-    }
-
-    /// What "its `--tools` names `codemode`" means: an exact name or a `*` pattern in `--tools`,
-    /// and not removed by `--exclude-tools`. No `--tools` at all is an unpinned child, which keeps
-    /// nothing extra.
-    #[test]
-    fn a_child_keeps_codemode_when_tools_name_it_and_exclude_tools_does_not() {
-        let cfg = |tools: Option<&[&str]>, exclude: &[&str]| {
-            let mut cfg = super::SessionConfig::new("/tmp", "/tmp/agent");
-            cfg.tools = tools.map(|t| t.iter().map(|s| (*s).to_string()).collect());
-            cfg.exclude_tools = exclude.iter().map(|s| (*s).to_string()).collect();
-            cfg
-        };
-        assert!(super::child_keeps_codemode(&cfg(
-            Some(&["read", "codemode"]),
-            &[]
-        )));
-        assert!(super::child_keeps_codemode(&cfg(Some(&["code*"]), &[])));
-        assert!(!super::child_keeps_codemode(&cfg(
-            Some(&["read", "bash"]),
-            &[]
-        )));
-        assert!(!super::child_keeps_codemode(&cfg(None, &[])));
-        assert!(!super::child_keeps_codemode(&cfg(
-            Some(&["read", "codemode"]),
-            &["codemode"]
-        )));
     }
 
     /// CFG-010 (dedupe half) — Pi's `dedupePackages` keeps BOTH entries, delta first, when a

@@ -1,13 +1,14 @@
-//! The codemode script reference, which the `codemode` tool description sends the model to `read`,
-//! lives under the agent directory, outside the project. Under an armed policy the external-directory
-//! guard answered that read with an approval prompt (a block when nobody can answer, `-p`) or, with
+//! The files this process spills for the model (`Full output: <path>` of a cut `bash` or script
+//! result, `Image saved to <path>`) sit in the temp directory, outside the project, and the result
+//! tells the model to read them. Under an armed policy the external-directory guard would answer
+//! that read with an approval prompt (a block when nobody can answer, `-p`) or, with
 //! `external_directory: deny`, a "Hard stop" that told the model not to retry. Pi has no permission
-//! system, so the conflict is the delta's own. These tests pin that exactly the shipped page is
-//! readable and nothing around it is.
+//! system, so the conflict is the delta's own. These tests pin that exactly the recorded paths are
+//! readable and nothing near them.
 //!
-//! The same holds for the files this process spills for the model (`Full output: <path>` of a cut
-//! `bash` or `codemode` result, `Image saved to <path>`), which the result tells the model to read
-//! and which sit in the temp directory: exactly the recorded paths are readable, nothing near them.
+//! **[CYRUP-DELTA]** the shipped `docs/codemode.md` reference this file also pinned is gone with
+//! the `codemode` built-in (docs/LEAN-FORK-PLAN.md), so `SHIPPED_REFERENCE_PAGES` is empty and the
+//! spill half stands on its own.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -78,110 +79,6 @@ fn blocked_for(outcome: &HookOutcome) -> String {
         HookOutcome::Block { reason, .. } => reason.clone().unwrap_or_default(),
         other => panic!("expected a block, got {other:?}"),
     }
-}
-
-#[tokio::test]
-async fn the_shipped_codemode_page_is_readable_under_every_external_directory_policy() {
-    let agent_dir = tempfile::tempdir().unwrap();
-    let project = tempfile::tempdir().unwrap();
-    let page = agent_dir.path().join("docs").join("codemode.md");
-    for external in ["ask", "deny"] {
-        let ext = extension(
-            agent_dir.path(),
-            &json!({ "tools": { "read": "allow" }, "external_directory": external }).to_string(),
-        )
-        .await;
-        let outcome = call(
-            &ext,
-            project.path(),
-            "page",
-            "read",
-            json!({ "path": page }),
-        )
-        .await;
-        assert!(
-            matches!(outcome, HookOutcome::Noop),
-            "external_directory {external}: {outcome:?}"
-        );
-        // Spelled with a `..` segment that lands on the same file, it is the same file.
-        let detour = agent_dir
-            .path()
-            .join("docs")
-            .join("..")
-            .join("docs")
-            .join("codemode.md");
-        let outcome = call(
-            &ext,
-            project.path(),
-            "detour",
-            "read",
-            json!({ "path": detour }),
-        )
-        .await;
-        assert!(
-            matches!(outcome, HookOutcome::Noop),
-            "external_directory {external}, detour: {outcome:?}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn only_the_page_itself_and_only_a_read_of_it_skips_the_external_directory_guard() {
-    let agent_dir = tempfile::tempdir().unwrap();
-    let project = tempfile::tempdir().unwrap();
-    let docs = agent_dir.path().join("docs");
-    let ext = extension(
-        agent_dir.path(),
-        &json!({ "tools": { "read": "allow", "write": "allow" }, "external_directory": "deny" })
-            .to_string(),
-    )
-    .await;
-    let outside = [
-        // Beside the page, under the same directory.
-        ("sibling", "read", docs.join("other.md")),
-        // The agent directory holds the credentials: a `..` out of docs/ is not the page.
-        ("auth", "read", docs.join("..").join("auth.json")),
-        ("settings", "read", agent_dir.path().join("settings.json")),
-        // The page's name elsewhere is a different file.
-        (
-            "elsewhere",
-            "read",
-            project.path().join("..").join("codemode.md"),
-        ),
-        // Only a read is exempt; changing the page meets the guard.
-        ("write", "write", docs.join("codemode.md")),
-    ];
-    for (id, tool, path) in outside {
-        let outcome = call(&ext, project.path(), id, tool, json!({ "path": path })).await;
-        let reason = blocked_for(&outcome);
-        assert!(
-            reason.contains("external directory permission denial"),
-            "{id}: {reason}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn the_read_policy_still_decides_a_read_of_the_shipped_page() {
-    let agent_dir = tempfile::tempdir().unwrap();
-    let project = tempfile::tempdir().unwrap();
-    let ext = extension(
-        agent_dir.path(),
-        &json!({ "tools": { "read": "deny" }, "external_directory": "allow" }).to_string(),
-    )
-    .await;
-    let outcome = call(
-        &ext,
-        project.path(),
-        "page",
-        "read",
-        json!({ "path": agent_dir.path().join("docs").join("codemode.md") }),
-    )
-    .await;
-    assert!(
-        blocked_for(&outcome).contains("read"),
-        "a denied read tool stays denied: {outcome:?}"
-    );
 }
 
 /// A spill file as the writers leave one: created, then recorded, in a directory outside the

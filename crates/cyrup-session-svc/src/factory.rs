@@ -27,9 +27,6 @@ pub struct SessionFactory {
     settings_store: Arc<dyn SettingsStore>,
     auth: Option<Arc<AuthStore>>,
     native_extensions: Vec<Arc<dyn NativeExtension>>,
-    /// Where the codemode extension finds the session each build produces
-    /// ([`SessionBuilder::codemode_host_slot`]).
-    codemode_host_slot: Option<cyrup_codemode_runtime::tool::CodemodeHostSlot>,
     cli_settings: Settings,
     provider_resolver: Option<Arc<dyn ProviderResolver>>,
     /// Project-trust store + interactive prompt, re-applied to every session this factory builds —
@@ -52,7 +49,6 @@ impl SessionFactory {
             settings_store: Arc::new(InMemorySettingsStore::new()),
             auth: None,
             native_extensions: Vec::new(),
-            codemode_host_slot: None,
             cli_settings: Settings::new(),
             provider_resolver: None,
             trust_store: None,
@@ -123,15 +119,6 @@ impl SessionFactory {
     #[must_use]
     pub fn with_native_extension(mut self, ext: Arc<dyn NativeExtension>) -> Self {
         self.native_extensions.push(ext);
-        self
-    }
-
-    /// Register the built-in `codemode` extension (re-`init`-ed into each freshly built session) and
-    /// bind every session this factory builds into its host slot ([`SessionBuilder::with_codemode`]).
-    #[must_use]
-    pub fn with_codemode(mut self, ext: cyrup_codemode_runtime::CodemodeExtension) -> Self {
-        self.codemode_host_slot = Some(ext.host().clone());
-        self.native_extensions.push(Arc::new(ext));
         self
     }
 
@@ -222,9 +209,6 @@ impl SessionFactory {
         for ext in &self.native_extensions {
             builder = builder.with_native_extension(ext.clone());
         }
-        if let Some(slot) = &self.codemode_host_slot {
-            builder = builder.codemode_host_slot(slot.clone());
-        }
         if reload_rebuild {
             builder = builder.reload_rebuild();
         }
@@ -262,9 +246,6 @@ impl SessionFactory {
         }
         for ext in &self.native_extensions {
             builder = builder.with_native_extension(ext.clone());
-        }
-        if let Some(slot) = &self.codemode_host_slot {
-            builder = builder.codemode_host_slot(slot.clone());
         }
         builder.build().await
     }

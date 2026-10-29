@@ -9,7 +9,7 @@ on if it finds a `cyrup-permissions.jsonc` anywhere it looks — no environment 
 means dropping a policy file into a repository turns the gate on for anyone who runs cyrup there.
 That is the feature working as designed; it is also the behaviour that surprises people, so know it
 before you commit a policy file. It changes the tool set too: with the system armed, every tool the
-policy does not `deny` is active, `grep`, `find`, `ls`, `powershell`, `codemode` and `tool_search`
+policy does not `deny` is active, `grep`, `find`, `ls`, `powershell` and `tool_search`
 included, whatever `defaultTools` says. See
 [Tools and permissions](../guides/tools-and-permissions.md#the-permission-system).
 
@@ -126,7 +126,7 @@ your workflow actually calls before you decide what to permit.
 ### tools
 
 Keyed by tool name: `read`, `write`, `edit`, `bash`, `powershell`, `grep`, `find`, `ls`, and any tool
-an extension registers (`codemode` and `tool_search` included). `*` wildcards are allowed, so
+an extension registers (`tool_search` included). `*` wildcards are allowed, so
 `"*": "ask"` covers everything you did not name.
 
 Tools that take a path also accept **resource-qualified** keys, which apply only to matching paths:
@@ -178,15 +178,10 @@ A closed set — the only keys accepted are:
 `"external_directory:/home/alice/shared/*": "allow"` permits one directory outside the project while
 the bare key stays at `ask`. Any other key in this block is rejected.
 
-One path outside the project needs no such rule: the `codemode` script reference that cyrup writes to
-`<agent dir>/docs/codemode.md` and that the `codemode` tool description sends the model to. A `read`
-of exactly that file skips `external_directory`; the `read` rule still applies, and so does
-`external_directory` for every other path, for a `write` of that file and for a path spelled with `..`
-into the rest of the agent directory.
-
-The same exemption covers the files cyrup itself wrote during the session for the model to read back:
-the temp file that a truncated `bash` result names (`Full output: /tmp/cyrup-bash-<id>.log`), and the
-`pi-codemode-<id>.txt` or image file a `codemode` result names (`Full output: ...`, `Image saved to
+The exemption that does apply covers the files cyrup itself wrote during the session for the model to
+read back:
+the temp file that a truncated `bash` result names (`Full output: /tmp/cyrup-bash-<id>.log`) and the
+spilled output or image files a cut result names (`Full output: ...`, `Image saved to
 ...`). Only those exact paths qualify, they are remembered for the life of the process, and only for
 a `read`: another file in the same directory, a `write` of the file, or a path that has since become
 a symbolic link meets `external_directory` as usual.
@@ -202,10 +197,10 @@ When a rule resolves to `ask`, the call stops and you get four options:
 | Reject | Refuse it |
 | Reject with Reason | Refuse it and type an explanation the model receives |
 
-The dialog of a call a [`codemode`](../guides/codemode.md) script made has a fifth option,
-**Reject All From This Script**: it refuses that call and ends the script, without another dialog.
-The script makes no further call, the calls waiting behind the dialog end with it, and the model is
-told `Script stopped:` with the refusal (`... the user rejected this script and stopped it`). What the
+The dialog of a call another tool made while it ran (a nested call) has a fifth option,
+**Reject All From This Script**: it refuses that call and ends the calling tool, without another
+dialog. The caller makes no further call, the calls waiting behind the dialog end with it, and the
+model is told the call was refused. What the
 script did before the refusal is not undone. Other scripts are asked as before.
 
 Pressing `Esc` counts as a reject, and so does a timeout. **The gate fails closed on anything but an
@@ -227,15 +222,16 @@ session in two processes: the process with the UI removes the marker on its firs
 children's questions are put to you. A child whose parent does have a UI, and is not answered, gives
 up after 10 minutes and the call is denied.
 
-### Calls made by a `codemode` script
+### Calls another tool makes
 
-A call a [`codemode`](../guides/codemode.md) script makes with `tools.*` is gated like a call the model
-makes: same rules, same dialog, same fail-closed rule. Two things differ. The `codemode` call has its
-own rule, so with `ask` you answer once for the script and again for each nested call that resolves to
-`ask`. And the dialog text, the headless block text and the audit entry say the call came from a
-script: the prompt ends with `(from codemode script)`, and the entry has a `parentToolCallId`. In a
-headless run (`-p`, `--mode json`) the script receives the block as an error that says so and names
-the fix; in `--mode rpc` the client is asked.
+An extension tool that calls other tools while it runs (`execute_tool` in a guest, `ctx.executeTool`
+in a native) gates each of those calls like a call the model makes: same rules, same dialog, same
+fail-closed rule. Two things differ. The calling tool has its own rule, so with `ask` you answer once
+for it and again for each nested call that resolves to `ask`. And the dialog text, the headless block
+text and the audit entry say where the call came from: the prompt ends with
+`(from a nested call of tool '<name>')`, and the entry has a `parentToolCallId`. In a headless run
+(`-p`, `--mode json`) the caller receives the block as an error that says so and names the fix; in
+`--mode rpc` the client is asked.
 
 ## The /permission-system command
 

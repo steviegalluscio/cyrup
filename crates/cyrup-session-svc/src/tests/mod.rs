@@ -19,7 +19,6 @@ mod builtin_structured_results;
 mod cache_warmer_state;
 mod cache_warming_docs;
 mod cmdhint01_argument_hint;
-mod codemode;
 mod compact_refusals;
 mod compaction_model_overrides;
 mod compaction_tokens_after;

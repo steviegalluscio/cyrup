@@ -100,8 +100,9 @@ fn the_default_sections_are_pis_apart_from_the_two_named_deltas() {
         );
     }
 
-    // docs: pi's text with the product name, and with pi's one `When asked about:` line replaced by
-    // the one entry cyrup ships (`docs/codemode.md`), which `builder.rs` marks `[CYRUP-DELTA]`.
+    // docs: pi's text with the product name, and with pi's `When asked about:` lines dropped — the
+    // one this fork used to ship pointed at `docs/codemode.md`, which is gone with the tool
+    // (docs/LEAN-FORK-PLAN.md), so `builder.rs` ships none.
     let pi_docs = pi["sections"]["docs"].as_str().unwrap();
     let pi_docs: Vec<&str> = pi_docs
         .lines()
@@ -114,13 +115,9 @@ fn the_default_sections_are_pis_apart_from_the_two_named_deltas() {
         .lines()
         .partition(|l| l.starts_with("- When asked about:"));
     assert_eq!(ours_docs, pi_docs);
-    assert_eq!(
-        ours_asked,
-        vec![
-            "- When asked about: codemode scripts and non-LLM models such as classifiers and image \
-             models (docs/codemode.md)"
-        ],
-        "the one documentation entry cyrup ships"
+    assert!(
+        ours_asked.is_empty(),
+        "this fork ships no documentation entry for a tool it does not have: {ours_asked:?}"
     );
 }
 

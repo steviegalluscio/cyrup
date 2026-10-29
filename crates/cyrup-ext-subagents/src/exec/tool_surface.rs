@@ -47,8 +47,10 @@
 use crate::error::SubagentError;
 use crate::exec::agent_config::AgentConfig;
 
-/// The `codemode` tool's name (`cyrup_codemode_runtime::EXTENSION_ID`, which is also the tool's
-/// name). This crate does not depend on the runtime crate, so the literal is restated.
+/// The name pi's `codemode` built-in answers to (`builtInExtensions`, `extensions/index.ts`
+/// @v1.0.1). This fork deletes that tool (docs/LEAN-FORK-PLAN.md); the name is kept here so a
+/// `tools:` entry naming it is subtracted from a ceilinged child's launch list exactly as pi's
+/// child session leaves the tool out under `denyExtensions`.
 const CODEMODE_TOOL_NAME: &str = "codemode";
 
 // ================================================================================================

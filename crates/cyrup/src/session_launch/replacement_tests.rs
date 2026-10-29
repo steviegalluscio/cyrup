@@ -45,7 +45,7 @@ fn recording_provider(declared: &Arc<Mutex<Vec<Vec<String>>>>, turns: usize) -> 
 
 /// With a permission policy that denies `bash`, the tool set the model is offered is shaped by the
 /// permission system at the start of each prompt. After a session replacement the new session is
-/// offered the same set the first one was: `codemode`, `grep`, `find`, `ls`, `powershell` and
+/// offered the same set the first one was: `grep`, `find`, `ls`, `powershell` and
 /// `tool_search` stay, and the denied `bash` is not declared again. Measured through the real binary
 /// before the fix: the first request declared eleven tools (no `bash`), the request after
 /// `new_session` declared `read, bash, edit, write, mcp, ask_user_question`.
@@ -80,8 +80,8 @@ async fn a_replaced_session_is_offered_the_tool_set_the_permission_policy_shapes
     let declared = declared.lock().unwrap().clone();
     assert_eq!(declared.len(), 2, "one request per prompt: {declared:?}");
     assert!(
-        declared[0].iter().any(|name| name == "codemode"),
-        "an armed permission system turns codemode on: {:?}",
+        declared[0].iter().any(|name| name == "tool_search"),
+        "an armed permission system turns tool_search on: {:?}",
         declared[0]
     );
     assert!(

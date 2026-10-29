@@ -145,12 +145,10 @@ and the footer's right cluster updates. See [Models and thinking](models.md).
 `Ctrl+O` toggles tool and bash output between collapsed and expanded, for the whole transcript.
 Collapsed is the default so a noisy `cargo build` does not bury the conversation.
 
-A [codemode](codemode.md#what-you-see) script is one tool row. Collapsed, it shows the first 10 lines of
-the script, then the calls the script made, one line each with a `✓`, `✗` or `⊘` and the time it
-took (the latest 8, after an `... (N earlier calls, Ctrl+O to expand)` line), and then up to 5
-lines of the script's output. The calls fill in while the script runs. Expanded, the row shows the
-whole script, every call with the error text of the failed ones, and the whole output; a
-`Full output: <path>` line names the file when the output was too long for the model.
+A tool that calls other tools while it runs shows those nested calls inside its own row: one line
+each with a `✓`, `✗` or `⊘` and the time it took (the latest 8 collapsed, after an
+`... (N earlier calls, Ctrl+O to expand)` line). They fill in while the parent call runs, and
+expanded the row shows every one of them with the error text of the failed ones.
 
 `Ctrl+T` hides and shows thinking blocks, reporting `Thinking blocks: hidden` or
 `Thinking blocks: visible` and persisting the choice as the `hideThinkingBlock` setting. It changes

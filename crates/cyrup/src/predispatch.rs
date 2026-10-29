@@ -7,13 +7,12 @@
 //!    a terminal host starts from the string `inspector.command` returns — VL-S6),
 //! 3. the internal `__intercom-broker` hop (spec/extensions/cyrup-intercom-port.md §7.3),
 //! 4. the internal `__mcp-keyring-helper` hop (13f-mcp-credentials MCP-260/MCP-261),
-//! 5. the internal `__codemode-sandbox` hop (one codemode script's sandbox process),
-//! 6. the package/config subcommands (pi `handlePackageCommand`, main.ts:486),
-//! 7. `auth print-api-key|print-bearer-token` (pi `runCredentialPrintCommand`, main.ts:557-559).
+//! 5. the package/config subcommands (pi `handlePackageCommand`, main.ts:486),
+//! 6. `auth print-api-key|print-bearer-token` (pi `runCredentialPrintCommand`, main.ts:557-559).
 //!
-//! The five internal hops are **classified** here and **dispatched** by `main.rs`, rather than
+//! The four internal hops are **classified** here and **dispatched** by `main.rs`, rather than
 //! being dispatched here, for one specific reason: each one first re-labels the process
-//! (`cyrup-subagent` / `cyrup-inspector` / `cyrup-broker` / `cyrup-mcp-keyring` / `cyrup-sandbox`, SEAM-070) and
+//! (`cyrup-subagent` / `cyrup-inspector` / `cyrup-broker` / `cyrup-mcp-keyring`, SEAM-070) and
 //! `set_process_name` needs `unsafe` (`prctl(PR_SET_NAME)` / `pthread_setname_np`), which this
 //! crate's `#![forbid(unsafe_code)]` rules out. Splitting classification from dispatch keeps the
 //! `unsafe` in the binary — where the rest of the process-identity work already lives — without
@@ -28,13 +27,13 @@ use anyhow::Context;
 use cyrup_config::{CliConfigOverrides, ConfigDirs, EnvVars};
 
 use crate::{
-    acp_terminal_login_cmd, codemode_sandbox_cmd, credential_print, intercom_broker_cmd,
-    mcp_keyring_helper_cmd, subagent_inspector_cmd, subagent_runner_cmd, subcommands,
+    acp_terminal_login_cmd, credential_print, intercom_broker_cmd, mcp_keyring_helper_cmd,
+    subagent_inspector_cmd, subagent_runner_cmd, subcommands,
 };
 
 /// Which internal, never-advertised subcommand this argv selects, if any.
 ///
-/// None of the five appears in `--help` or in `subcommands::SUBCOMMANDS`. All five MUST be
+/// None of the four appears in `--help` or in `subcommands::SUBCOMMANDS`. All four MUST be
 /// recognized before ANY user-facing arg leniency/clap parsing — and before the package/config
 /// pre-dispatch, which has no knowledge of them and would otherwise fall through to ordinary clap
 /// parsing, misinterpreting `--config <path>` (or `--async-dir <dir>`) against the user-facing
@@ -71,11 +70,6 @@ pub enum Internal {
     /// stdin and one on stdout, so it must reach [`crate::mcp_keyring_helper_cmd::dispatch`] before
     /// anything can log, print, or otherwise put a byte on stdout.
     McpKeyringHelper,
-    /// `__codemode-sandbox` — the hidden subcommand the `codemode` tool re-execs `current_exe()`
-    /// into to run one script's V8 isolate in a process of its own. The child speaks framed JSON
-    /// on stdin and stdout, so it must reach [`crate::codemode_sandbox_cmd::dispatch`] before
-    /// anything can log, print, or otherwise put a byte on the stdout the parent is reading.
-    CodemodeSandbox,
     /// `--terminal-login` — the ACP client's Authenticate button (ACP-001). Port of pi-acp v0.0.33
     /// `index.ts`'s top-level `process.argv.includes("--terminal-login")` block.
     ///
@@ -85,14 +79,14 @@ pub enum Internal {
     /// [`crate::acp_terminal_login_cmd::is_selected`]. (2) It is not `__`-prefixed and is not
     /// internal: it is a token cyrup publishes to clients in `AuthMethod::Terminal.args`
     /// (`ACP-011`). (3) It does **not** end the process — `main` strips its tokens and falls
-    /// through into the ordinary interactive launch, which is why it is classified LAST of the five
+    /// through into the ordinary interactive launch, which is why it is classified LAST of the four
     /// (a `__subagent-runner` whose own argv happens to contain the token must still be a subagent
     /// runner).
     AcpTerminalLogin,
 }
 
 /// Classify the internal pre-dispatch. `raw` (not the program-stripped `argv`) is passed because
-/// all six `is_selected` predicates expect the binary name at index 0, matching
+/// all five `is_selected` predicates expect the binary name at index 0, matching
 /// `std::env::args()`'s own shape.
 pub fn classify_internal(raw: &[String]) -> Option<Internal> {
     if subagent_runner_cmd::is_selected(raw) {
@@ -110,10 +104,7 @@ pub fn classify_internal(raw: &[String]) -> Option<Internal> {
     if mcp_keyring_helper_cmd::is_selected(raw) {
         return Some(Internal::McpKeyringHelper);
     }
-    if codemode_sandbox_cmd::is_selected(raw) {
-        return Some(Internal::CodemodeSandbox);
-    }
-    // ACP-001 — LAST of the five, because its predicate is membership anywhere in argv rather than a
+    // ACP-001 — LAST of the four, because its predicate is membership anywhere in argv rather than a
     // fixed position: checking it first would let a `--terminal-login` appearing in one of the four
     // internal subcommands' own argv hijack that hop.
     if acp_terminal_login_cmd::is_selected(raw) {
@@ -149,37 +140,4 @@ pub async fn run_predispatch(argv: &[String]) -> anyhow::Result<Option<i32>> {
         return Ok(Some(code));
     }
     Ok(None)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn argv(tokens: &[&str]) -> Vec<String> {
-        tokens.iter().map(|token| (*token).to_string()).collect()
-    }
-
-    /// The sandbox process is started by `current_exe() __codemode-sandbox`. A classification arm
-    /// with no `main.rs` dispatch arm fails silently, so this pins the half that lives here: the
-    /// token the runtime starts its processes with is the token that is classified, and nothing
-    /// else is.
-    #[test]
-    fn the_codemode_sandbox_hop_is_classified_by_the_token_the_runtime_starts_it_with() {
-        assert_eq!(
-            classify_internal(&argv(&[
-                "cyrup",
-                cyrup_codemode_runtime::sandbox::HOST_SUBCOMMAND
-            ])),
-            Some(Internal::CodemodeSandbox)
-        );
-        assert_eq!(
-            classify_internal(&argv(&["cyrup", "__codemode-sandbox", "--terminal-login"])),
-            Some(Internal::CodemodeSandbox),
-            "an internal hop is not hijacked by --terminal-login"
-        );
-        assert_eq!(
-            classify_internal(&argv(&["cyrup", "codemode-sandbox"])),
-            None
-        );
-    }
 }

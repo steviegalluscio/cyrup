@@ -39,10 +39,11 @@ and four that each gained more than 40,000 lines:
   extension: the provider, model discovery, Hugging Face search and the `/llama` manager.
   `cyrup-llama-cpp-wire` is a test-only crate holding the `llama-server` wire as one cited
   definition the workspace's fake servers answer from.
-- **codemode on an embedded V8.** Split in two so a consumer's `build.rs` can snapshot the engine
-  half: `cyrup-codemode` (+5,005) is the script format, TypeScript declaration renderer, BM25 tool
-  ranker and output budget; `cyrup-codemode-runtime` (+19,203) is the `deno_core` sandbox and the
-  tool's script globals. `cyrup-tool-search` adds pi's `tool_search` over deferred tools.
+- **Tool search over a JavaScript-shaped core.** `cyrup-codemode` (+5,005) is the engine-independent
+  half of pi's codemode: the BM25 tool ranker and the ECMAScript string, number and key-comparison
+  semantics `cyrup-mcp` and `cyrup-tool-search` share. `cyrup-tool-search` adds pi's `tool_search`
+  over deferred tools. pi's `codemode` tool itself — the `deno_core`/V8 sandbox and its script
+  globals — is deleted in this fork (`docs/LEAN-FORK-PLAN.md`); V8 goes with workflowScript.
 - **The Pico5 durability kernel**, four crates (+35,414) separating a pure document core from the
   imperative shell, the storage contract and a JSONL backend with its lock, marker protocol and
   recovery.
@@ -112,11 +113,6 @@ the command palette.
   Google, Bedrock, Vertex, Copilot, OpenRouter, Groq, Together, Mistral, Fireworks and more.
 - **The built-in tool set**: `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls`, over
   an `FsOps`/`ProcOps` interface that tests substitute.
-- **Codemode**, an optional tool (off by default) with which the model writes one JavaScript script that
-  calls the other tools, in parallel if it likes, and only the script's output comes back. Each script
-  runs in a V8 sandbox in a process of its own, and every call it makes passes the same permission gate
-  as any other. Turn it on with `"defaultTools": ["+codemode"]` or
-  `--tools read,bash,edit,write,codemode`; see [Codemode](docs/guide/guides/codemode.md).
 - **A session tree on disk** as JSONL, with compaction, forking, import and export.
 - **Five run modes.** The terminal interface, plus `--mode print`, `--mode json` and `--mode rpc`
   for scripting and embedding, and `--mode acp` to run as an
@@ -272,9 +268,8 @@ it, not by coverage. Dependencies point downward only. `cyrup-core` depends on n
 | `cyrup-mcp` | 93,340 | 84.8% | MCP client: servers, tools, OAuth, sampling, elicitation, wire tracer, the `/mcp` surface |
 | `cyrup-acp` | 21,539 | 94.1% | Agent Client Protocol adapter: an editor (Zed is the reference client) drives cyrup over ACP JSON-RPC on stdio |
 | `cyrup-llama` | 21,654 | 96.5% | llama.cpp router support: provider, model discovery, Hugging Face search and the `/llama` manager, as a native extension |
-| `cyrup-codemode` | 5,005 | 98.8% | codemode's engine-independent half: script source format, TypeScript declaration renderer, BM25 tool ranker, output budget |
-| `cyrup-codemode-runtime` | 19,203 | 92.0% | codemode's engine-bound half: the `deno_core` sandbox, the `codemode` tool and its script globals |
-| `cyrup-tool-search` | 940 | 98.5% | pi's `tool_search`: finds codemode and deferred tools by BM25 and loads the matches |
+| `cyrup-codemode` | 5,005 | 98.8% | the engine-independent half pi's codemode shares with tool search: BM25 tool ranker, ECMAScript string/number/key semantics (pi's `codemode` tool is deleted here — see `docs/LEAN-FORK-PLAN.md`) |
+| `cyrup-tool-search` | 940 | 98.5% | pi's `tool_search`: finds deferred tools by BM25 and loads the matches |
 | `cyrup-pico` | 12,710 | 76.1% | Pico5 durability kernel, imperative shell: the mutation line, the transaction, drafts, the durability witnesses |
 | `cyrup-pico-doc` | 4,932 | 76.6% | Pico5's functional core: `DocValue`, the operation applier, the replay planner — total functions over explicit inputs |
 | `cyrup-pico-store` | 8,806 | 81.0% | Pico5's storage layer: identity, sequence and value newtypes, and the storage contract |
@@ -295,7 +290,7 @@ mdbook serve   # http://localhost:3000, live-reloads on save
 ```
 
 - [Install](docs/guide/getting-started/install.md) · [Connect a provider](docs/guide/getting-started/authenticate.md) · [Your first session](docs/guide/getting-started/first-session.md)
-- [The terminal interface](docs/guide/guides/tui.md) · [sessions](docs/guide/guides/sessions.md) · [models and thinking](docs/guide/guides/models.md) · [tools and permissions](docs/guide/guides/tools-and-permissions.md) · [codemode](docs/guide/guides/codemode.md)
+- [The terminal interface](docs/guide/guides/tui.md) · [sessions](docs/guide/guides/sessions.md) · [models and thinking](docs/guide/guides/models.md) · [tools and permissions](docs/guide/guides/tools-and-permissions.md)
 - [Scripting and automation](docs/guide/guides/scripting.md) · [Zed and other ACP editors](docs/guide/guides/zed-acp.md)
 - [How extensions work](docs/guide/extensions/overview.md) · [subagents](docs/guide/extensions/subagents.md) · [permissions](docs/guide/extensions/permissions.md) · [intercom](docs/guide/extensions/intercom.md) · [Flux](docs/guide/extensions/flux.md)
 - [CLI reference](docs/guide/reference/cli.md) · [`settings.json`](docs/guide/reference/settings.md) · [environment variables](docs/guide/reference/environment.md) · [keybindings](docs/guide/reference/keybindings.md) · [troubleshooting](docs/guide/reference/troubleshooting.md)

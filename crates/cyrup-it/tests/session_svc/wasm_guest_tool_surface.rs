@@ -3,9 +3,14 @@
 //! The `cyrup-ext-sdk` demo component registers three tools for this surface: `structured_demo`
 //! (declares an `outputSchema` and annotations, and returns `structuredContent`), `failing_demo`
 //! (reports a failure without throwing) and `loadout_demo` (supplies a `prepareLoadout` hook).
-//! Each test drives the component through `registration.register-tool`, the session's tool
-//! registry, the provider request and a codemode script, so the WIT record, the host lift and the
+//! Each test drives the component through `registration.register-tool`, the session's tool registry,
+//! the provider request and a tool call the MODEL issues, so the WIT record, the host lift and the
 //! `Tool` accessors are crossed, not hand-built.
+//!
+//! **[CYRUP-DELTA]** pi crosses this surface from inside a `codemode` script (`tools.structured_demo(…)`);
+//! this fork ships no codemode (docs/LEAN-FORK-PLAN.md), so the model's own call is the caller. The
+//! structured value a guest returns is read where a host reads it — the `tool_execution_end` event's
+//! `result` — because the model itself never receives structured content (`pi`'s rule as well).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -16,41 +21,34 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use cyrup_codemode_runtime::CodemodeExtension;
-use cyrup_codemode_runtime::testkit::{ScriptEnv, ScriptedSandboxFactory, completed};
-use cyrup_codemode_runtime::types::CodemodeResult;
-use cyrup_core::{ExtensionId, Message, NestedCallStatus, StopReason};
+use cyrup_core::{ExtensionId, StopReason};
 use cyrup_provider::faux::{
     FauxProvider, FauxResponseStep, faux_assistant_message, faux_text, faux_tool_call,
 };
 use cyrup_provider::{Provider, ToolDef};
-use cyrup_session_svc::{AgentSession, SessionBuilder, SessionConfig};
-use futures::FutureExt as _;
+use cyrup_session_svc::{AgentSession, AgentSessionEvent, SessionBuilder, SessionConfig};
+use futures::StreamExt as _;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use crate::support::bins;
 
-type Script = cyrup_codemode_runtime::testkit::Script;
 type Requests = Arc<Mutex<Vec<Vec<ToolDef>>>>;
 
-fn script<F, Fut>(f: F) -> Script
-where
-    F: Fn(String, ScriptEnv) -> Fut + Send + Sync + 'static,
-    Fut: std::future::Future<Output = CodemodeResult> + Send + 'static,
-{
-    Arc::new(move |code, env| f(code, env).boxed())
-}
+/// A tool call the scripted model makes.
+type Call = (&'static str, Value);
 
 struct Rig {
     session: Arc<AgentSession>,
     faux: Arc<FauxProvider>,
     requests: Requests,
+    /// Every `tool_execution_end` event: the tool's name, its `result`, and its error verdict.
+    ends: Arc<Mutex<Vec<(String, Value, bool)>>>,
     _tmp: TempDir,
 }
 
-/// A session with the codemode extension (its sandbox is `script`) and the demo guest component.
-async fn rig(script: Script) -> Rig {
+/// A session with the demo guest component and nothing else attached.
+async fn rig() -> Rig {
     let tmp = TempDir::new().unwrap();
     let cwd: PathBuf = tmp.path().join("project");
     let agent_dir = tmp.path().join("agent");
@@ -59,13 +57,7 @@ async fn rig(script: Script) -> Rig {
     let faux = Arc::new(FauxProvider::new());
     let mut cfg = SessionConfig::new(cwd, agent_dir);
     cfg.trust_override = Some(true);
-    // `codemode` is a built-in of the path tier `--no-extensions` collapses.
-    cfg.no_extensions = false;
     let session = SessionBuilder::new(faux.clone() as Arc<dyn Provider>, cfg)
-        .with_codemode(CodemodeExtension::new(
-            Default::default(),
-            Arc::new(ScriptedSandboxFactory::new(script)),
-        ))
         .build()
         .await
         .unwrap()
@@ -79,10 +71,30 @@ async fn rig(script: Script) -> Rig {
         .await
         .expect("load the demo guest");
     session.bind_extensions().await;
+
+    let requests: Requests = Arc::default();
+    let ends: Arc<Mutex<Vec<(String, Value, bool)>>> = Arc::default();
+    let mut stream = session.subscribe();
+    let sink = Arc::clone(&ends);
+    tokio::spawn(async move {
+        while let Some(event) = stream.next().await {
+            if let AgentSessionEvent::ToolExecutionEnd {
+                tool_name,
+                result,
+                is_error,
+                ..
+            } = event
+            {
+                sink.lock().unwrap().push((tool_name, result, is_error));
+            }
+        }
+    });
+
     Rig {
         session,
         faux,
-        requests: Arc::default(),
+        requests,
+        ends,
         _tmp: tmp,
     }
 }
@@ -93,39 +105,81 @@ impl Rig {
         self.session.set_active_tools_by_name(&names).await;
     }
 
-    /// One prompt. When `code` is given the model's reply calls `codemode` with it first; either
-    /// way the provider records the tools of every request it receives.
-    async fn prompt(&self, code: Option<&str>) {
-        let replies = [code.map(|c| json!({ "code": c })), None];
-        let steps = replies
-            .into_iter()
-            .map(|reply| {
+    /// One prompt. When `calls` is given the model's replies are those tool calls, each followed by
+    /// a final text reply; either way the provider records the tools of every request it receives.
+    async fn prompt(&self, calls: &[Call]) {
+        let steps: Vec<FauxResponseStep> = calls
+            .iter()
+            .map(|(name, args)| {
+                let seen = Arc::clone(&self.requests);
+                let name = (*name).to_string();
+                let args = args.clone();
+                FauxResponseStep::factory(move |ctx, _opts, _state, _model| {
+                    seen.lock().unwrap().push(ctx.tools.clone());
+                    faux_assistant_message(
+                        vec![faux_tool_call(name.clone(), args.clone())],
+                        StopReason::ToolUse,
+                    )
+                })
+            })
+            .chain(std::iter::once({
                 let seen = Arc::clone(&self.requests);
                 FauxResponseStep::factory(move |ctx, _opts, _state, _model| {
                     seen.lock().unwrap().push(ctx.tools.clone());
-                    match &reply {
-                        Some(args) => faux_assistant_message(
-                            vec![faux_tool_call("codemode".to_string(), args.clone())],
-                            StopReason::ToolUse,
-                        ),
-                        None => faux_assistant_message(vec![faux_text("done")], StopReason::Stop),
-                    }
+                    faux_assistant_message(vec![faux_text("done")], StopReason::Stop)
                 })
-            })
+            }))
             .collect();
         self.faux.set_response_steps(steps);
         let _ = self.session.prompt("go").await.unwrap();
         self.session.wait_for_idle().await;
+
+        // The end events are emitted on the fan-out; wait for the calls to have landed.
+        let started = std::time::Instant::now();
+        while self.ends.lock().unwrap().len() < calls.len()
+            && started.elapsed() < std::time::Duration::from_secs(10)
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
     }
 
-    async fn codemode_result(&self) -> Message {
+    /// The newest tool result the session recorded for `tool`: its text and whether it is an error.
+    async fn tool_result(&self, tool: &str) -> (String, bool) {
         self.session
             .messages()
             .await
             .into_iter()
             .rev()
-            .find(|m| matches!(m, Message::ToolResult { tool_name, .. } if tool_name == "codemode"))
-            .expect("a codemode tool result")
+            .find_map(|message| match message {
+                cyrup_core::Message::ToolResult {
+                    tool_name,
+                    content,
+                    is_error,
+                    ..
+                } if tool_name == tool => {
+                    let text = content
+                        .iter()
+                        .filter_map(|c| match c {
+                            cyrup_core::Content::Text { text, .. } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    Some((text, is_error))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("a `{tool}` tool result"))
+    }
+
+    /// The `tool_execution_end` event of `tool`, if one was seen.
+    fn end_for(&self, tool: &str) -> Option<(Value, bool)> {
+        self.ends
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(name, _, _)| name == tool)
+            .map(|(_, result, is_error)| (result.clone(), *is_error))
     }
 
     fn first_request_tools(&self) -> Vec<ToolDef> {
@@ -133,73 +187,60 @@ impl Rig {
     }
 }
 
-/// The script's output text: the content after the `Script completed …` header.
-fn script_output(message: &Message) -> String {
-    let Message::ToolResult { content, .. } = message else {
-        panic!("not a tool result");
-    };
-    content[1..]
-        .iter()
-        .filter_map(|block| match block {
-            cyrup_core::Content::Text { text, .. } => Some(text.to_string()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// A guest tool that declares an `outputSchema` resolves, in a codemode script, to the
-/// `structuredContent` it returned, not to its text (pi `toScriptValue`, `execute.ts:303-312`).
+/// A guest tool that declares an `outputSchema` reaches the model as its TEXT, and its structured
+/// value reaches the host as the `tool_execution_end` event's `structuredContent` — the WIT record
+/// carries both across the boundary, and neither is the other (`ToolOutput::with_structured_content`,
+/// pi `ToolResultEventResult.structuredContent`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_script_receives_the_structured_content_of_a_guest_tool_with_an_output_schema() {
-    let rig = rig(script(|_code, env| async move {
-        let value = env.tool("structured_demo", json!({ "n": 3 })).await;
-        completed(Vec::new(), value.unwrap())
-    }))
-    .await;
-    rig.set_active(&["codemode", "structured_demo"]).await;
+async fn a_call_reaches_a_guest_tool_and_its_structured_content_reaches_the_host() {
+    let rig = rig().await;
+    rig.set_active(&["structured_demo"]).await;
+    rig.prompt(&[("structured_demo", json!({ "n": 3 }))]).await;
 
-    rig.prompt(Some("return await tools.structured_demo({ n: 3 });"))
-        .await;
+    let (text, is_error) = rig.tool_result("structured_demo").await;
+    assert!(!is_error, "the guest call succeeded: {text:?}");
+    assert!(
+        text.contains("doubled 3"),
+        "the model gets the tool's text: {text:?}"
+    );
+    assert!(
+        !text.contains("tags"),
+        "the structured content is not folded into the text the model sees: {text:?}"
+    );
 
-    let output = script_output(&rig.codemode_result().await);
+    let (end, _) = rig
+        .end_for("structured_demo")
+        .expect("a tool_execution_end for the guest call");
     assert_eq!(
-        serde_json::from_str::<Value>(&output).unwrap_or(Value::String(output.clone())),
+        end["structuredContent"],
         json!({ "doubled": 6, "tags": ["a", "b"] }),
-        "the script must get the structured value, not the tool's text"
+        "the structured content the guest returned crossed the WIT boundary intact: {end}"
     );
 }
 
-/// A guest that reports a failure without throwing (`ToolOutput::error`) is a failed nested call.
+/// A guest that reports a failure without throwing (`ToolOutput::error`) is an error result for the
+/// call, with its text intact — the failure is a verdict, not an exception.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_guest_tool_that_reports_a_failure_is_a_failed_nested_call() {
-    let rig = rig(script(|_code, env| async move {
-        let value = env.tool("failing_demo", json!({})).await;
-        completed(Vec::new(), value.unwrap())
-    }))
-    .await;
-    rig.set_active(&["codemode", "failing_demo"]).await;
+async fn a_guest_tool_that_reports_a_failure_is_an_error_result() {
+    let rig = rig().await;
+    rig.set_active(&["failing_demo"]).await;
+    rig.prompt(&[("failing_demo", json!({}))]).await;
 
-    rig.prompt(Some("return await tools.failing_demo({});"))
-        .await;
-
-    let Message::ToolResult { nested_calls, .. } = rig.codemode_result().await else {
-        panic!("not a tool result");
-    };
-    let calls = nested_calls.expect("the nested calls are recorded").calls;
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].name, "failing_demo");
-    assert_eq!(
-        calls[0].status,
-        NestedCallStatus::Error,
-        "the guest's isError reached the nested call's verdict"
+    let (text, is_error) = rig.tool_result("failing_demo").await;
+    assert!(is_error, "the guest's failure is an error result: {text:?}");
+    let (end, event_is_error) = rig
+        .end_for("failing_demo")
+        .expect("a tool_execution_end for the guest call");
+    assert!(
+        event_is_error,
+        "the failure reached the event's verdict: {end}"
     );
 }
 
 /// `getAllTools` reports a guest tool's annotations (pi `ToolInfo.annotations`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_guest_tools_annotations_reach_the_session_tool_info() {
-    let rig = rig(script(|_code, _env| async { completed(Vec::new(), None) })).await;
+    let rig = rig().await;
 
     let tools = rig.session.all_tools();
     let info = tools
@@ -223,11 +264,11 @@ async fn a_guest_tools_annotations_reach_the_session_tool_info() {
 /// while that tool is declared.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_guest_tools_prepare_loadout_hides_a_declaration_and_rewrites_a_description() {
-    let rig = rig(script(|_code, _env| async { completed(Vec::new(), None) })).await;
+    let rig = rig().await;
     rig.set_active(&["loadout_demo", "signal_probe", "demo_echo"])
         .await;
 
-    rig.prompt(None).await;
+    rig.prompt(&[]).await;
 
     let sent = rig.first_request_tools();
     let names: Vec<&str> = sent.iter().map(|t| t.name.as_str()).collect();
@@ -261,11 +302,11 @@ async fn a_guest_tools_prepare_loadout_hides_a_declaration_and_rewrites_a_descri
 /// because the tool that hid it is no longer active.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_guest_declaration_is_shown_again_when_the_hook_that_hid_it_is_not_active() {
-    let rig = rig(script(|_code, _env| async { completed(Vec::new(), None) })).await;
+    let rig = rig().await;
     rig.set_active(&["loadout_demo", "signal_probe"]).await;
     rig.set_active(&["signal_probe", "demo_echo"]).await;
 
-    rig.prompt(None).await;
+    rig.prompt(&[]).await;
 
     let names: Vec<String> = rig
         .first_request_tools()

@@ -158,13 +158,13 @@ chat prompt, and cyrup reads the probabilities the server gives the label tokens
 then normalises them. A choice returns every option's probability and a confidence of
 `(n * peak - 1) / (n - 1)`; a score returns the expected level.
 
-**In cyrup a session reaches them through [codemode](guides/codemode.md#models).** There is no flag, slash
-command or `cyrup-sdk` method that asks a classifier question; with the `codemode` tool on, the
-model writes a script that lists the classifier models with `models.getAvailableOfType("classifier",
-"llama.cpp")` and asks its questions with `models.classify()`, then keeps only the answers. See
-[Codemode](guides/codemode.md#classify) for the call and an example. Outside a session, the entry point is
-`cyrup_provider::Models::classify`, which a program embedding cyrup's crates, or a native extension,
-can call. Classifier models are persisted next to the chat models in `models-store.json`.
+**Classifier models are not a session tool in this fork.** There is no flag, slash command,
+`cyrup-sdk` method or built-in tool that asks a classifier question: what used to expose
+`models.classify()` to a model was the `codemode` tool, and this fork does not ship it
+(see `docs/LEAN-FORK-PLAN.md`). The entry point is `cyrup_provider::Models::classify`, which a program
+embedding cyrup's crates, or a native extension, can call — an extension that wants a classifier in
+the loop registers its own tool over it. Classifier models are persisted next to the chat models in
+`models-store.json`.
 
 Things worth knowing if you use them:
 

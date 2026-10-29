@@ -34,9 +34,6 @@ cyrup-provider = { workspace = true }
 cyrup-tools = { workspace = true }
 cyrup-session = { workspace = true }
 cyrup-config = { workspace = true }
-# `CodemodeHost`, the seam the `codemode` tool acts through; the session implements it
-# (`session/codemode.rs`) and `SessionBuilder::with_codemode` binds it.
-cyrup-codemode-runtime = { workspace = true }
 cyrup-resources = { workspace = true }
 indexmap = { workspace = true }
 # `src/host_services.rs:17-19` opens with `cyrup_ext::caps::http::HttpCaps`,
@@ -86,9 +83,6 @@ cyrup-agent = { workspace = true }
 cyrup-ext = { workspace = true }
 cyrup-session = { workspace = true }
 cyrup-config = { workspace = true }
-# A scripted sandbox and a recording host, so the session tests drive the real `codemode` tool.
-cyrup-codemode-runtime = { workspace = true, features = ["testkit"] }
-cyrup-codemode = { workspace = true }
 # The real `tool_search` tool and extension, so the session tests drive deferred loading end to end.
 cyrup-tool-search = { workspace = true }
 cyrup-tools = { workspace = true }

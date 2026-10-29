@@ -7,17 +7,20 @@
 //! text(JSON.parse(pkg).name);
 //! ```
 //!
-//! # Production call path
+//! # Call path in this fork
 //!
-//! * [`parse_codemode_source`] is the first step of a `codemode` tool call: it splits the model's
-//!   `code` argument into the script and its [`CodemodeSourceOptions`] (pi `execute.ts:329`). The
-//!   options carry `max_output_tokens`, which feeds [`crate::output::truncate_output`], and
-//!   `timeout_ms`, which feeds the sandbox's deadline. The options line is the first non-blank line
-//!   (one surrounding markdown fence is stripped first), and a later one is an error: both are
-//!   [CYRUP-DELTA]s from upstream, which reads the very first line only.
-//! * [`CODEMODE_SOURCE_GRAMMAR`] is what the `codemode` tool declares as its grammar-constrained
-//!   input on providers that support it: `cyrup_core::constrained_sampling::GrammarVariants`'
-//!   `openai_lark` field takes it as is (gap-analysis CODE-003).
+//! **[CYRUP-DELTA]** the `codemode` tool that consumed this format is not shipped here
+//! (docs/LEAN-FORK-PLAN.md); the parser and the grammar survive as the `codemode` source-format
+//! definition, exercised by this crate's own tests.
+//!
+//! * [`parse_codemode_source`] splits a script's `code` argument into the script and its
+//!   [`CodemodeSourceOptions`] (pi `execute.ts:329`). The options carry `max_output_tokens` and
+//!   `timeout_ms`. The options line is the first non-blank line (one surrounding markdown fence is
+//!   stripped first), and a later one is an error: both are [CYRUP-DELTA]s from upstream, which
+//!   reads the very first line only.
+//! * [`CODEMODE_SOURCE_GRAMMAR`] is the grammar-constrained input the `codemode` tool declared on
+//!   providers that support it: `cyrup_core::constrained_sampling::GrammarVariants`' `openai_lark`
+//!   field takes it as is (gap-analysis CODE-003).
 
 use serde_json::Value;
 

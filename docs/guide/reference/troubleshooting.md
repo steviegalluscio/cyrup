@@ -91,7 +91,7 @@ directory or in `<repo>/.cyrup/agent/`, *or* when an `agents/` directory in eith
 non-empty, *or* when its own `config.json` differs from the template.
 
 An armed gate also sets the active tools: every tool its policy does not deny is active, so a session
-that had four tools gains `grep`, `find`, `ls`, `powershell`, `codemode` and `tool_search`, whatever
+that had four tools gains `grep`, `find`, `ls`, `powershell` and `tool_search`, whatever
 `defaultTools` says. See
 [The permission system](../guides/tools-and-permissions.md#the-permission-system).
 
@@ -204,14 +204,9 @@ Providers that take a token budget rather than an effort string collapse `xhigh`
 The wasm runtime reserves a pool of address space when it starts. Under a limited address space
 (`ulimit -v`, a container's `--ulimit as`, a CI job wrapper) that reservation fails, so cyrup builds
 the runtime without the pool and logs a `warn` line once: the session and the built-in extensions
-(`codemode`, `mcp`, `flux`, the permission system) start normally. A wasm extension may still fail to
+(`mcp`, `flux`, the permission system) start normally. A wasm extension may still fail to
 load under the limit, and a failure to load is reported like any other extension load failure.
 Raise the limit, or remove the extension.
-
-`codemode` scripts need more room than that: the script sandbox is a process of its own and V8
-reserves a large range of address space when it starts. A script failed at a limit of 32 GiB and
-below with `Script sandbox failed: ... terminated by signal 5 (SIGTRAP)` and ran at 40 GiB and above;
-the message now names the limit when it sees one. The rest of the session is not affected.
 
 ## The first build takes forever
 
@@ -240,24 +235,24 @@ the string `"disabled"` for `httpIdleTimeoutMs`:
 
 Delete the key to get the default back.
 
-## `codemode` is missing, or a script cannot find a tool
+## A tool is missing, or a call cannot find a tool
 
-`codemode` is registered but off by default, unless a permission policy is armed, which activates every
-tool it does not deny. Turn it on with `"defaultTools": ["+codemode"]` in the global `settings.json`,
-or for one run with `--tools read,bash,edit,write,codemode`. If it is still missing, one of these
+`grep`, `find`, `ls` and `powershell` are registered but off by default, and so is the `tool_search`
+tool a built-in extension provides, unless a permission policy is armed, which activates every tool it
+does not deny. Turn a tool on with `"defaultTools": ["+tool_search"]` in the global `settings.json`,
+or for one run with `--tools read,bash,edit,write,tool_search`. If it is still missing, one of these
 holds: the line is in a project's `.cyrup/settings.json` and that project is not trusted (a `-p` run
-needs `--approve`); `--tools` does not name it; `--no-extensions` is set, which removes the tool;
-`--exclude-tools` matches it; the permission policy denies it. Startup says so when a `defaultTools`
-name matches no tool: `defaultTools: no activatable tool is registered as "codemode"`. If `codemode`
-is on when you did not turn it on, a permission policy file is the cause (see
-[The permission system](../guides/tools-and-permissions.md#the-permission-system)): deny it there or
-pass `--exclude-tools codemode`.
+needs `--approve`); `--tools` does not name it; `--no-extensions` is set, which removes the tools of
+the built-in extensions; `--exclude-tools` matches it; the permission policy denies it. Startup says so
+when a `defaultTools` name matches no tool: `defaultTools: no activatable tool is registered as
+"tool_search"`. If a tool is on when you did not turn it on, a permission policy file is the cause
+(see [The permission system](../guides/tools-and-permissions.md#the-permission-system)): deny it there
+or pass `--exclude-tools <name>`.
 
-Inside a script, `tools.grep does not exist` means the tool is not active (`grep`, `find` and `ls`
-are off in a default session, but on under a permission policy) or a permission rule, `--tools` or
-`--exclude-tools` left it out; the error lists the tools that exist. The other symptoms — a timeout,
-running out of memory, an approval that a `-p` run cannot give, temp files that pile up — are in
-[Codemode](../guides/codemode.md#troubleshooting).
+A call to a tool that is not in the active set comes back as `Tool <name> not found`. That means the
+tool is not active (`grep`, `find` and `ls` are off in a default session, but on under a permission
+policy), or a permission rule, `--tools` or `--exclude-tools` left it out of the registry. `session`
+and the TUI's tool listing show what a session actually has.
 
 ## Getting more detail
 

@@ -16,12 +16,65 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::{AgentSessionRuntime, NoTools, SessionConfig, SessionFactory, SessionTarget};
-use cyrup_codemode_runtime::CodemodeExtension;
 use cyrup_config::{InMemorySettingsStore, SettingsScope};
-use cyrup_core::StopReason;
+use cyrup_core::{
+    CancelToken, ExtensionId, StopReason, Tool, ToolCallId, ToolError, ToolExposure, ToolResult,
+    ToolUpdateSink,
+};
+use cyrup_ext::{ExtError, HookOutcome, HostCtx, HostEvent, InitApi, NativeExtension};
 use cyrup_provider::Provider;
 use cyrup_provider::faux::{FauxProvider, FauxResponseStep, faux_assistant_message, faux_text};
 use tempfile::TempDir;
+
+/// A registered-inactive extension tool standing in for pi's `builtin:codemode` (not shipped by
+/// this fork, docs/LEAN-FORK-PLAN.md): same name, same `ModelOnly` exposure, same registration
+/// path. These cases are about the SETTING reaching extension tools, not about the tool itself.
+struct CodemodeProbe;
+
+#[async_trait::async_trait]
+impl Tool for CodemodeProbe {
+    fn name(&self) -> &str {
+        "codemode"
+    }
+    fn parameters(&self) -> &serde_json::Value {
+        static PARAMS: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+        PARAMS.get_or_init(|| serde_json::json!({ "type": "object", "properties": {} }))
+    }
+    fn description(&self) -> &str {
+        "probe tool standing in for pi's builtin:codemode"
+    }
+    fn exposure(&self) -> ToolExposure {
+        ToolExposure::ModelOnly
+    }
+    fn default_active(&self) -> bool {
+        false
+    }
+    async fn execute(
+        &self,
+        _call_id: ToolCallId,
+        _params: serde_json::Value,
+        _cancel: CancelToken,
+        _on_update: ToolUpdateSink,
+    ) -> Result<ToolResult, ToolError> {
+        Ok(ToolResult::default())
+    }
+}
+
+struct CodemodeExt;
+
+#[async_trait::async_trait]
+impl NativeExtension for CodemodeExt {
+    fn id(&self) -> ExtensionId {
+        ExtensionId::from("codemode")
+    }
+    async fn init(&self, api: &mut InitApi) -> Result<(), ExtError> {
+        api.register_tool(Arc::new(CodemodeProbe));
+        Ok(())
+    }
+    async fn on_event(&self, _ev: &HostEvent, _ctx: &HostCtx) -> HookOutcome {
+        HookOutcome::Noop
+    }
+}
 
 struct Rig {
     _tmp: TempDir,
@@ -46,10 +99,7 @@ async fn rig(settings: &str, configure: impl FnOnce(&mut SessionConfig)) -> Rig 
     let factory = Arc::new(
         SessionFactory::new(faux.clone() as Arc<dyn Provider>, cfg)
             .settings_store(store.clone())
-            .with_codemode(CodemodeExtension::new(
-                Default::default(),
-                Arc::new(cyrup_codemode_runtime::tool::EngineSandboxFactory),
-            )),
+            .with_native_extension(Arc::new(CodemodeExt)),
     );
     let runtime = AgentSessionRuntime::create(factory, SessionTarget::New)
         .await
@@ -402,10 +452,7 @@ async fn a_cold_resume_compares_the_setting_with_the_loadout_the_session_began_w
     let factory = Arc::new(
         SessionFactory::new(Arc::new(FauxProvider::new()) as Arc<dyn Provider>, cfg)
             .settings_store(store)
-            .with_codemode(CodemodeExtension::new(
-                Default::default(),
-                Arc::new(cyrup_codemode_runtime::tool::EngineSandboxFactory),
-            )),
+            .with_native_extension(Arc::new(CodemodeExt)),
     );
     let resumed = AgentSessionRuntime::create(factory, SessionTarget::Resume(file))
         .await

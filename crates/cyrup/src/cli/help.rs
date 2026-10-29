@@ -21,11 +21,13 @@ use cyrup_session_svc::ExtensionFlagDeclaration;
 ///   two least guessable parts of `config` were invisible from the top-level help and — until
 ///   SEAM-079 — from `config --help` as well.
 ///
-/// [CYRUP-DELTA] The Examples block carries a `codemode` line, so the tool can be found from
-/// `--help`. Upstream's (`args.ts:398` @v1.0.4) is `--tools read,bash,codemode,'mcp__radius__*'`,
-/// "codemode with only the tools of one MCP server"; this build's MCP extension names a server's
-/// tools `<server>_<tool>` unless `toolPrefix` says otherwise, and an allowlist entry of that form
-/// does not narrow the MCP tools, so the example here only enables the tool.
+/// [CYRUP-DELTA] The Examples block carries a `tool_search` line, so the tool can be found from
+/// `--help`. Upstream's (`args.ts:398` @v1.0.4) carries a `codemode` example
+/// (`--tools read,bash,codemode,'mcp__radius__*'`); this fork does not ship `codemode`
+/// (docs/LEAN-FORK-PLAN.md), so the example names the next built-in that is off by default,
+/// `tool_search`. This build's MCP extension names a server's tools `<server>_<tool>` unless
+/// `toolPrefix` says otherwise, and an allowlist entry of that form does not narrow the MCP tools,
+/// so the example here only enables the tool.
 pub fn render_help(extension_flags: &[ExtensionFlagDeclaration]) -> String {
     const APP: &str = "cyrup";
     const CFG: &str = ".cyrup";
@@ -183,12 +185,12 @@ Examples:
   # Read-only mode (no file modifications possible)
   {APP} --tools read,grep,find,ls -p \"Review the code in src/\"
 
-  # Add codemode to the default tools
-  {APP} --tools +codemode
+  # Add tool_search to the default tools
+  {APP} --tools +tool_search
 
-  # Codemode: the model writes one script that calls the other tools
-  # (it is off by default; \"defaultTools\": [\"+codemode\"] in settings.json keeps it on)
-  {APP} --tools read,bash,edit,write,codemode
+  # Tool search: the model finds and loads deferred tools on demand
+  # (it is off by default; \"defaultTools\": [\"+tool_search\"] in settings.json keeps it on)
+  {APP} --tools read,bash,edit,write,tool_search
 
   # Disable one tool while keeping the rest available
   {APP} --exclude-tools ask_question

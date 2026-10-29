@@ -6,8 +6,9 @@
 //! (`rank/tests.rs`: `tokenize_splits_camel_case_and_snake_case_drops_stop_words_and_folds_plurals`,
 //! `ranks_by_term_relevance_and_respects_the_limit`,
 //! `returns_nothing_for_unknown_or_empty_queries`, `includes_the_namespace_in_the_search_text`) and in
-//! `cyrup-codemode-runtime` (`tool/description/tests.rs`, the five `createCodemodeDescription`
-//! cases). What the tool itself does is pinned here, and in the session tests of `cyrup-session-svc`.
+//! pi's `cyrup-codemode-runtime` (its `tool/description/tests.rs`, the five
+//! `createCodemodeDescription` cases), which this fork does not ship (docs/LEAN-FORK-PLAN.md). What
+//! the tool itself does is pinned here, and in the session tests of `cyrup-session-svc`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

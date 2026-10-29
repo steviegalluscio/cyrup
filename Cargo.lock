@@ -1435,7 +1435,6 @@ dependencies = [
  "clap",
  "cyrup",
  "cyrup-acp",
- "cyrup-codemode-runtime",
  "cyrup-config",
  "cyrup-core",
  "cyrup-ext",
@@ -1512,30 +1511,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "cyrup-codemode-runtime"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "cyrup-agent",
- "cyrup-codemode",
- "cyrup-config",
- "cyrup-core",
- "cyrup-ext",
- "cyrup-provider",
- "cyrup-tools",
- "deno_core",
- "feruca",
- "futures",
- "nix 0.31.3",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
@@ -1722,8 +1697,6 @@ dependencies = [
  "cyrup",
  "cyrup-acp",
  "cyrup-agent",
- "cyrup-codemode",
- "cyrup-codemode-runtime",
  "cyrup-config",
  "cyrup-core",
  "cyrup-ext",
@@ -2022,8 +1995,6 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "cyrup-agent",
- "cyrup-codemode",
- "cyrup-codemode-runtime",
  "cyrup-config",
  "cyrup-core",
  "cyrup-ext",
@@ -2122,7 +2093,6 @@ dependencies = [
  "chrono",
  "crossterm_winapi",
  "cyrup-agent",
- "cyrup-codemode-runtime",
  "cyrup-config",
  "cyrup-core",
  "cyrup-ext",

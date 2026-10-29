@@ -99,7 +99,7 @@ define_tool(descriptor, |call: ToolCall| {
 ```
 
 `call.tools()` lists what `execute_tool` can reach: the active `direct` tools and every registered
-`codemode` or `deferred` one. The call gets the id `<your call id>/<n>`, never enters the transcript,
+`deferred` one. The call gets the id `<your call id>/<n>`, never enters the transcript,
 and is recorded, with its usage, as `nestedCalls` on your tool's result. A tool that fails comes
 back as an outcome with `is_error` set; `Err` means the call could not be made at all (the host's
 text says why).
@@ -130,7 +130,7 @@ Your handlers tell a nested call from a model-issued one by `parent_tool_call_id
 calls: they reach it as the same event.
 
 A `tool_result` handler sees the tool's machine-readable result as `structured_content` (a tool
-that declares an `outputSchema` sets it, and a codemode script receives it instead of the text) and
+that declares an `outputSchema` sets it, and a handler receives it instead of the text) and
 replaces it through `ToolResultPatch::structured_content` (`EventPatch::ToolResult` in a native).
 Replacing `content` without returning `structured_content` drops it, because it may no longer
 match the text; return it along with `content` to keep it. Handlers chain in load order, and a
@@ -270,8 +270,9 @@ persisted as (`message_entry_id`, `tool_result_entry_ids`), which a `context_edi
 
 A tool can declare the shape of a machine-readable result with
 `ToolDescriptor::output_schema(schema)` and return it with
-`ToolOutput::with_structured_content(value)`. The model still reads `content`; a codemode script
-that calls the tool receives the structured value instead of the text. A result for which
+`ToolOutput::with_structured_content(value)`. The model still reads `content`; a `tool_result`
+handler, or a native extension that calls the tool, receives the structured value instead of the
+text. A result for which
 `ToolOutput::error(..)` was used is reported as a failed call (`is_error`), and its structured
 content is kept for programmatic callers.
 

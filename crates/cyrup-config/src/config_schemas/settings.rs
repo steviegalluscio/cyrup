@@ -116,8 +116,6 @@ struct RuntimeDefaults {
     code_block_indent: Value,
     mermaid: Value,
     anthropic_extra_usage: Value,
-    codemode_mode: Value,
-    codemode_inline_budget: Value,
     cache_warming: Value,
     tui_mode: Value,
     fullscreen_exit_output: Value,
@@ -176,8 +174,6 @@ fn runtime_defaults() -> RuntimeDefaults {
         // `warnings()` keeps the raw optional; the `?? true` lives at its consumer, exactly as pi's
         // `getWarnings()` leaves it to `SETTINGS_DEFAULTS.warnings.anthropicExtraUsage`.
         anthropic_extra_usage: s.warnings().anthropic_extra_usage.unwrap_or(true).into(),
-        codemode_mode: ser(s.codemode_mode()),
-        codemode_inline_budget: inline_budget_value(s.codemode_inline_budget()),
         cache_warming: ser(s.cache_warming_mode()),
         tui_mode: ser(s.tui_mode()),
         fullscreen_exit_output: ser(s.fullscreen_exit_output()),
@@ -187,19 +183,6 @@ fn runtime_defaults() -> RuntimeDefaults {
             WheelScrollLines::Auto => "auto".into(),
             WheelScrollLines::Lines(n) => n.get().into(),
         },
-    }
-}
-
-/// The inline budget is an `f64` at runtime; JSON shows an integral value without a fraction, as
-/// pi's `3000` does.
-fn inline_budget_value(budget: f64) -> Value {
-    #[allow(clippy::cast_possible_truncation)]
-    let integral = budget as i64;
-    #[allow(clippy::cast_precision_loss)]
-    if integral as f64 == budget {
-        integral.into()
-    } else {
-        budget.into()
     }
 }
 
@@ -420,34 +403,6 @@ fn warnings(d: &RuntimeDefaults) -> Value {
         "anthropicExtraUsage",
         with_default(boolean(), d.anthropic_extra_usage.clone()),
     )])
-}
-
-/// `CodemodeSettingsSchema` (`settings-schema.ts:151-174`).
-fn codemode(d: &RuntimeDefaults) -> Value {
-    object(vec![
-        opt(
-            "mode",
-            described_default(
-                string_literals(&["on", "only"]),
-                "How codemode presents tools. \"on\" keeps direct tools declared and annotates \
-                 tools callable from scripts; codemode lists only tools without direct exposure. \
-                 \"only\" lists every script-callable tool in codemode and does not declare \
-                 active direct tools.",
-                d.codemode_mode.clone(),
-            ),
-        ),
-        opt(
-            "inlineBudget",
-            with(
-                number(),
-                json!({
-                    "minimum": 0,
-                    "description": "Estimated tokens available for inline codemode tool declarations.",
-                    "default": d.codemode_inline_budget,
-                }),
-            ),
-        ),
-    ])
 }
 
 fn string_array() -> Value {
@@ -741,7 +696,6 @@ pub(super) fn settings_schema() -> Value {
             ),
             opt("markdown", markdown(&d)),
             opt("warnings", warnings(&d)),
-            opt("codemode", codemode(&d)),
             opt(
                 "sessionDir",
                 described(

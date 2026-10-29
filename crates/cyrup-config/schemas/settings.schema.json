@@ -588,31 +588,6 @@
         }
       }
     },
-    "codemode": {
-      "type": "object",
-      "properties": {
-        "mode": {
-          "anyOf": [
-            {
-              "type": "string",
-              "const": "on"
-            },
-            {
-              "type": "string",
-              "const": "only"
-            }
-          ],
-          "description": "How codemode presents tools. \"on\" keeps direct tools declared and annotates tools callable from scripts; codemode lists only tools without direct exposure. \"only\" lists every script-callable tool in codemode and does not declare active direct tools.",
-          "default": "on"
-        },
-        "inlineBudget": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Estimated tokens available for inline codemode tool declarations.",
-          "default": 3000
-        }
-      }
-    },
     "sessionDir": {
       "type": "string",
       "description": "Custom session storage directory, in the same format as the --session-dir CLI flag."

@@ -69,6 +69,44 @@ it, so it needs rewiring. Accepted consequence: no status in herdr's Agents side
 
 ---
 
+## Status
+
+**Step 1 — DONE on `lean/1-codemode`.** `cyrup-codemode-runtime`, the `__codemode-sandbox` hop, the
+tool's globals, the TUI renderer seam, the `cyrup-it` `codemode_wire` seam and the dependency entries
+in `cyrup` / `cyrup-session-svc` / `cyrup-tui` / `cyrup-it` are gone; ~32k lines deleted. V8 is still
+in the graph — `cyrup-ext-subagents`'s `workflows/scripted/` pulls `deno_core` until step 2.
+
+What the step touched beyond the plan's "self-contained" line:
+
+- **Settings.** `codemode.mode` and `codemode.inlineBudget` are deleted from `cyrup-config` (types,
+  `EffectiveSettings` getters, the generated schema and its committed
+  `schemas/settings.schema.json`). The settings document is not closed, so a file still carrying the
+  `codemode` object loads and ignores it.
+- **System prompt.** pi's `When asked about: codemode scripts … (docs/codemode.md)` docs pointer is
+  dropped from the `docs` section; `cyrup-session` and `cyrup-test-support` now pin that no
+  `When asked about:` entry and no `codemode` mention survive.
+- **Permission labels.** `gate::format_nested_origin_label`'s `"(from codemode script)"` arm is gone:
+  every nested caller is labelled `(from a nested call of tool '<name>')`, and the headless block hint
+  reads `A nested call cannot answer an approval prompt without a UI: …`.
+- **Tests kept, by porting them to the model's own tool call** (they were written through a script):
+  `cyrup/src/session_launch/mcp_tests.rs` (11 MCP-over-real-launch-wiring tests),
+  `cyrup-it` `session_svc/wasm_guest_tool_surface.rs` (5 guest-component seam tests; the structured
+  result is read off the `tool_execution_end` event, which is where a host reads it), and the
+  `--tools` / `--exclude-tools` / permission-gate probes in `session_launch.rs` (they now drive `bash`
+  directly and prove a command ran by its marker file). Deleted as unrecoverable: the codemode-script
+  half of `cyrup-it` `llama/classify.rs` (CODE-023, it tested the script's `models.classify()` global)
+  and `codemode.mode: only` cases, the setting being gone.
+- **Accepted deltas.** Two properties were only observable from a script: a `directTools: "search"`
+  server's tool being callable without being active, and pi's script-side wait for a starting server
+  being longer than the dispatcher's 5 s. The MCP seam tests now pin the fork's behaviour instead — a
+  registered-but-inactive tool is unreachable to a call, and a call to a still-starting server rides
+  the launch wiring's own wait (fixture server: 1 s).
+- **Docs.** `docs/codemode.md` and `docs/guide/guides/codemode.md` deleted, and with them the SUMMARY
+  entry; README, cli, settings, troubleshooting, tools-and-permissions, scripting, tui, zed-acp,
+  llama-cpp, subagents and permissions prose updated. `ToolExposure::Codemode` stays in `cyrup-core`
+  on purpose: it is a tool *exposure* that `tool_search` and the MCP adapter use, not the deleted tool
+  (and `cyrup-codemode` itself stays, per D2, until the step 3 rename).
+
 ## Order
 
 `1 → 2 → 3 → 4`

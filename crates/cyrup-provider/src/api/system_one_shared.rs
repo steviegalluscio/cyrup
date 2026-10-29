@@ -86,7 +86,8 @@ pub(crate) fn wire_request(context: &ClassifierContext) -> Map<String, Value> {
 /// `[CYRUP-DELTA, intentional]` PROV-156: pi sends the question OBJECT it was handed (`question`,
 /// or for a bool `{ ...question, type: "noul" }`), so a JSON caller's member order and any member
 /// the type does not name reach the server. cyrup's question is typed at the parse boundary, which
-/// is where the delta is recorded (`cyrup-codemode-runtime`'s `check_classifier_context`). On this
+/// is where the delta was recorded (pi's codemode `check_classifier_context`; this fork ships no
+/// codemode — docs/LEAN-FORK-PLAN.md). On this
 /// wire it is the observable half: the Workers AI `typesafe/jev` input schema closes every question
 /// object and a noul's criteria (`additionalProperties: false`), so a service validating against it
 /// would refuse pi's request with an extra member and answers cyrup's; llama.cpp reads the three

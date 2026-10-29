@@ -199,13 +199,6 @@ impl AgentSession {
             .execute(caller_call_id, name, args, options)
             .await
     }
-
-    /// The tools a nested call resolves against — pi `_getCallableTools()`
-    /// (`agent-session.ts:1515-1520`): the active `direct` tools and every registered `codemode`
-    /// or `deferred` one.
-    pub(super) fn callable_tools(&self) -> Vec<Arc<dyn Tool>> {
-        Self::lock(&self.dynamic_tools).callable_tools()
-    }
 }
 
 /// [`NestedToolCallHost`] over a session — pi's inline `new NestedToolCallRunner({ getTools,
