@@ -133,7 +133,6 @@ impl ResponseTimer {
 
 /// Time the response `inner` produces, from now: its first terminal gets `durationMs` unless an
 /// inner timer already set one.
-#[must_use]
 pub fn timed(inner: EventStream<StreamEvent>) -> EventStream<StreamEvent> {
     Box::pin(Timed {
         inner,

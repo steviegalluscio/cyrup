@@ -321,14 +321,12 @@ impl ModelCall {
     }
 
     /// A one-event stream carrying [`Self::errored`] as its terminal.
-    #[must_use]
     pub fn errored_stream(&self, message: impl Into<String>) -> EventStream<StreamEvent> {
         terminal_only(self.errored(message))
     }
 }
 
 /// A stream of exactly one terminal event.
-#[must_use]
 pub fn terminal_only(message: AssistantMessage) -> EventStream<StreamEvent> {
     Box::pin(futures::stream::iter(vec![StreamEvent::terminal(message)]))
 }
@@ -372,7 +370,6 @@ impl Drop for AbortOnDrop {
 /// Start `call` on `provider` — pi's `provider.stream` / `provider.streamSimple` dispatch at the end
 /// of `ModelRuntime.stream` / `.streamSimple` (`core/model-runtime.ts:703`, `:739` @v1.0.4), with
 /// `call`'s options lowered for its verb and its [`CancelToken`] as the request's `signal`.
-#[must_use]
 pub fn dispatch(
     provider: &dyn cyrup_provider::Provider,
     model: &cyrup_provider::Model,
