@@ -999,7 +999,7 @@ async fn dispatch_run_control(session: Arc<AgentSession>, line: String) -> (RunC
                 Ok(answer) => answer,
                 // Unreachable through `is_inline_command`, which admits only the three run-control
                 // types; answered rather than assumed.
-                Err((_, raw_id)) => RunControl::Answer(RpcResponse::err(
+                Err(raw_id) => RunControl::Answer(RpcResponse::err(
                     "unknown",
                     raw_id,
                     "not a run-control command".to_string(),
@@ -1110,14 +1110,21 @@ fn prompt_response(
 }
 
 /// The run-control arms of [`handle`] (`prompt`/`steer`/`follow_up`) — split out so SEAM-158's
-/// [`dispatch_run_control`] can run them without a runtime. `Err` hands back any other command,
-/// with its id, untouched.
+/// [`dispatch_run_control`] can run them without a runtime.
+///
+/// `Err` means `cmd` was not a run-control command. It carries only the id, never the command: both
+/// callers reach here through [`is_inline_command`], which admits ONLY `prompt`/`steer`/`follow_up`,
+/// so the arm is unreachable and neither caller could have re-dispatched the command anyway. An id
+/// is kept because each caller must still answer that request with an error envelope. The payload
+/// was once the whole command, which `clippy::result_large_err` measured at 128 bytes against an
+/// `Ok` arm (`RunControl`) of 216 — the command was never the fat half, and boxing it could not have
+/// shrunk the `Result` below 216.
 async fn handle_run_control(
     session: &AgentSession,
     cmd: SessionCommand,
     raw_id: Option<Value>,
     in_flight: &mut bool,
-) -> Result<RunControl, (SessionCommand, Option<Value>)> {
+) -> Result<RunControl, Option<Value>> {
     Ok(match cmd {
         SessionCommand::Prompt {
             message,
@@ -1180,7 +1187,9 @@ async fn handle_run_control(
                 Err(e) => RunControl::Answer(RpcResponse::err("follow_up", id, e.to_string())),
             }
         }
-        other => return Err((other, raw_id)),
+        // Not one of the three run-control kinds: unreachable from either caller (both route
+        // through `is_inline_command`), and the command is dropped because nothing can re-dispatch it.
+        _ => return Err(raw_id),
     })
 }
 
@@ -1207,7 +1216,7 @@ async fn handle(
                 // Only `dispatch`'s own callers reach a run-control command here (the loop runs
                 // them through `dispatch_run_control`), so waiting for the answer holds up nothing.
                 Ok(RunControl::Later(answer)) => answer.await,
-                Err((_, raw_id)) => RpcResponse::err("unknown", raw_id, "unreachable".to_string()),
+                Err(raw_id) => RpcResponse::err("unknown", raw_id, "unreachable".to_string()),
             }
         }
         SessionCommand::Abort => {
