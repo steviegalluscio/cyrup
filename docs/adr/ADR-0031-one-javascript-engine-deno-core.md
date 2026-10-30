@@ -1,6 +1,13 @@
 # ADR-0031 — One JavaScript engine: `deno_core`
 
-**Status** accepted (owner direction, 2026-10-03: "why would we do anything other than `deno_core` which we've already invested extensively in?")
+**Status** moot as of 2026-10-29 — the workspace embeds no JavaScript engine at all. Both consumers
+that made the choice live are deleted: pi's `codemode` tool and its `deno_core`/V8 sandbox
+(`docs/LEAN-FORK-PLAN.md` step 1), and the `workflowScript` runtime that was `deno_core`'s only
+remaining user, which left with the subagents extension (step 4). No `deno_core`, no `deno_ast`, no
+`deno_error`, no `libv8` in the graph, and no engine ADR to honour when the next one is raised.
+The decision as written remains correct on its own terms: *if* cyrup embeds a JS engine, it is
+`deno_core`, and nothing else.
+Accepted (owner direction, 2026-10-03: "why would we do anything other than `deno_core` which we've already invested extensively in?")
 **Date** 2026-10-03
 **Decides** which JavaScript engine cyrup embeds, if it embeds one for any purpose. It does **not** decide whether or when to build pi's `codemode` tool (`CODE-001`…`CODE-013`); it fixes only what such a tool would run on.
 **Supersedes** the sentence "Do not raise a JS engine anywhere, for anything" in `docs/gap-analysis/MCP-PORT-METHODOLOGY.md` §1.2, Cut 4 — as to its scope, not its substance (see Decision 2).
