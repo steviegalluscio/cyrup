@@ -1,8 +1,8 @@
 //! The live bridge — the four-state gate, the process-wide handle, and the entry points
 //! `extension/host/native_impl.rs` calls.
 //!
-//! [`state`](super::state) and [`label`](super::label) are pure. [`reporter`](super::reporter),
-//! [`consumer`] and [`reporter`](super::reporter) each own one live concern. This
+//! [`state`](super::state) is pure. [`consumer`] and
+//! [`reporter`](super::reporter) each own one live concern. This
 //! file is what joins them to cyrup's own lifecycle, and it is where the decision *whether any of
 //! it runs at all* is made.
 //!
@@ -71,11 +71,10 @@ use cyrup_herdr::{EnvSource, HerdrClient, HerdrPane, ProcessEnv};
 use tokio::task::JoinHandle;
 
 use super::consumer::{self, ConsumerDeps};
-use super::label::{MetadataText, RunLabel, metadata_text};
+use super::fleet::FleetView;
 use super::reporter::{Metadata, Reporter};
-use super::state::{RunAttention, StateModel};
-use crate::background::{ActivityState, RunId};
-use crate::tui::fleet_state::{AsyncRunView, FleetState};
+use super::state::StateModel;
+use crate::token::RunToken;
 
 /// How often the human-wait watcher samples [`HumanInteractionLock::is_held`].
 ///
@@ -264,6 +263,16 @@ impl HerdrBridge {
             }
         }
 
+        // The arm-time claim. A pane that has received NOTHING from cyrup is indistinguishable
+        // from a cyrup that never started — herdr's `session.snapshot` answers `agents: []` and
+        // every pane `agent_status: "unknown"`, which is the exact state the old, extension-gated
+        // placement left every default session in. So the bridge states where it stands the moment
+        // it takes the pane: the empty fleet view, which the model resolves to `idle` and the
+        // reporter sends. A companion that HAS runs feeds its real [`FleetView`] on the same
+        // `session_start` (registered after this built-in, so it lands second), and both inputs are
+        // levels, so the pair converges regardless of order.
+        bridge.sync_fleet(&FleetView::default());
+
         tracing::debug!(pane_id = %bridge.pane.pane_id(), "herdr: the status bridge is armed");
         Some(bridge)
     }
@@ -321,53 +330,47 @@ impl HerdrBridge {
 
     /// A run is asking for the human — the foreground control-notice edge.
     ///
-    /// `message` must be a control-notice **reason token**, never a rendered notice body:
-    /// `format_control_notice_message` (`extension/executor/notices.rs:322-325`) interpolates the
-    /// child's own output, and that text may not reach a shared sidebar. See [`super::label`].
-    pub fn raise_attention(&self, run_id: &RunId, message: Option<&str>) {
+    /// `message` must be a control-notice **reason token**, never a rendered notice body: the
+    /// subagents companion's `format_control_notice_message`
+    /// (`crates/cyrup-ext-subagents/src/extension/executor/notices.rs:322-325`) interpolates the
+    /// child's own output, and that text may not reach a shared sidebar. The rule is the feeding
+    /// companion's; the bridge only carries what it is handed.
+    pub fn raise_attention(&self, run_id: &RunToken, message: Option<&str>) {
         self.edge(|model| model.raise_attention(run_id, message));
     }
 
     /// A run stopped asking, or ended.
-    pub fn clear_attention(&self, run_id: &RunId) {
+    pub fn clear_attention(&self, run_id: &RunToken) {
         self.edge(|model| model.clear_attention(run_id));
     }
 
-    /// Re-derive everything that is a *level* rather than an edge, from the fleet projection, and
-    /// republish the pane's label — `HostEvent::TurnEnd`, `SessionStart`, and every run-ended bus
-    /// event.
+    /// Re-derive everything that is a *level* rather than an edge, from a companion's
+    /// [`FleetView`], and republish the pane's label — `HostEvent::TurnEnd`, `SessionStart`, and
+    /// every run-ended bus event.
     ///
-    /// Three things come from here and from nowhere else:
+    /// Three things come from here and from nowhere else, and all three are **fed**, never read:
     ///
-    /// 1. **Detached background runs**, as a level. A runner started by a *previous* cyrup process
-    ///    is still going and will never deliver a "started" edge to this one, so an edge count
-    ///    could not see it. [`AsyncRunView::is_active`] is the same `Queued | Running` test the
-    ///    fleet UI uses.
-    /// 2. **Background attention**, from `activity_state == NeedsAttention` on the run's telemetry
+    /// 1. **Detached background runs**, as [`FleetView::active_runs`]. A runner started by a
+    ///    *previous* cyrup process is still going and will never deliver a "started" edge to this
+    ///    one, so an edge count could not see it — hence a level, recomputed at every resync.
+    ///    Which runs count (pi's `Queued | Running`, de-duplicated across in-memory and on-disk
+    ///    lists) is the companion's rule; the subagents companion keeps it in
+    ///    `crates/cyrup-ext-subagents/src/herdr/mod.rs`'s `fleet_view`.
+    /// 2. **Attention**, as [`FleetView::attention`] — for subagents runs, from
+    ///    `activity_state == NeedsAttention` on the run's telemetry
     ///    (`crates/cyrup-ext-subagents/src/background/telemetry.rs:29-31`).
-    /// 3. **The label**, rebuilt from [`RunLabel::from_async_run`], which reaches
-    ///    `workflow_task_label` and nothing else. [`RunLabel::new`] — the other constructor —
-    ///    does take an `Option<&str>` launch label, and it is `pub`; what makes the privacy rule
-    ///    structural is not the absence of that parameter but that BOTH constructors route every
-    ///    string they emit through `workflow_task_label` (`label.rs:169-172`). This producer
-    ///    passes no free text to either.
+    /// 3. **The label**, as [`FleetView::metadata`]. Rendering it is the companion's job, and so is
+    ///    the privacy rule that bounds it: the bridge has one renderer per companion
+    ///    (`cyrup-ext-subagents`'s `herdr::label::published_text` is the only function that turns
+    ///    runs into published text there), and it accepts a rendered text, never raw run fields.
     ///
-    /// `project_panes` is the count of project panes this session has opened; `0` renders no pane
-    /// clause at all, exactly as pi does when its callback is absent (`herdr-status.ts:162-163`).
-    pub fn sync_fleet(&self, fleet: &FleetState, project_panes: usize) {
+    /// A session with no companion fleet at all feeds [`FleetView::default`] — which is what makes
+    /// the bridge arm there rather than sit out: the root turn and the human-wait lock are its own
+    /// inputs, and this call is simply what it never makes.
+    pub fn sync_fleet(&self, view: &FleetView) {
         if self.stopped() {
             return;
         }
-        let active = active_background_runs(fleet);
-        let attention: Vec<RunAttention> = active
-            .iter()
-            .map(|run| RunAttention {
-                run_id: run.status.run_id.clone(),
-                needs_attention: run.status.telemetry.activity_state
-                    == Some(ActivityState::NeedsAttention),
-                message: None,
-            })
-            .collect();
         let reports = {
             let mut model = self
                 .model
@@ -375,16 +378,15 @@ impl HerdrBridge {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             // Both inputs are levels, so both are applied before anything is sent: applying them
             // one at a time could emit `working` and then `blocked` for one resync.
-            let first = model.set_active_background_runs(active.len());
-            let second = model.resync_attention(&attention);
+            let first = model.set_active_background_runs(view.active_runs);
+            let second = model.resync_attention(&view.attention);
             second.or(first)
         };
         if let Some(report) = reports {
             self.reporter.report(report);
         }
-        self.reporter.metadata(
-            published_text(&active, project_panes).map_or(Metadata::Clear, Metadata::Set),
-        );
+        self.reporter
+            .metadata(view.metadata.clone().map_or(Metadata::Clear, Metadata::Set));
     }
 
     /// Clear the pane's label and release cyrup's authority, then stop every task.
@@ -430,48 +432,6 @@ impl HerdrBridge {
     }
 }
 
-/// Turn the active runs into the text that goes on the pane — **the only function in this crate
-/// that does**, and it has exactly one caller: [`HerdrBridge::sync_fleet`], which is what
-/// `native_impl.rs` calls.
-///
-/// One producer is the privacy rule's structural half. There used to be two — `sync_fleet` and a
-/// `metadata_for` sibling that re-derived the same text for the tests — and a mutation applied to
-/// the production one (passing `AsyncRunView::description`, pi's free-text launch task, as a
-/// launch label) left the whole suite green because the test asserted on the sibling. A second
-/// renderer is a second place for the rule to be broken, so there is one.
-fn published_text(active: &[&AsyncRunView], project_panes: usize) -> Option<MetadataText> {
-    let attention = active
-        .iter()
-        .filter(|run| run.status.telemetry.activity_state == Some(ActivityState::NeedsAttention))
-        .count();
-    let labels: Vec<RunLabel> = active
-        .iter()
-        .map(|run| RunLabel::from_async_run(run))
-        .collect();
-    metadata_text(&labels, project_panes, attention)
-}
-
-/// Every active detached background run in `fleet`, de-duplicated by run id.
-///
-/// `tracked_jobs` (in memory) and `history_jobs` (on disk, not tracked by this process) overlap —
-/// pi filters the second against the first before concatenating (`fleet.ts:193,199`) — and a run
-/// counted twice would keep the pane at `working` after it ended.
-fn active_background_runs(fleet: &FleetState) -> Vec<&AsyncRunView> {
-    let mut seen: Vec<&RunId> = Vec::new();
-    let mut active: Vec<&AsyncRunView> = Vec::new();
-    for run in fleet.tracked_jobs.iter().chain(fleet.history_jobs.iter()) {
-        if !run.is_active() {
-            continue;
-        }
-        if seen.iter().any(|id| **id == run.status.run_id) {
-            continue;
-        }
-        seen.push(&run.status.run_id);
-        active.push(run);
-    }
-    active
-}
-
 /// Sample the session's human-interaction lock and feed its held↔unheld edges to the bridge.
 ///
 /// Holds a [`std::sync::Weak`] so that a released bridge is actually dropped: the task is aborted
@@ -513,10 +473,49 @@ mod tests {
     use cyrup_ext::host::HostServices;
 
     use super::*;
+    use crate::fleet::MetadataText;
+    use crate::state::RunAttention;
 
-    /// The agent every fixture run invokes. It is what a production workflow node's label
-    /// degrades to, so it is what the published summary must name.
-    const AGENT_NAME: &str = "reviewer";
+    /// A pane environment whose socket path does not exist. The gate passes — that is the whole
+    /// point of these tests — and every send fails, which is the third row of [`crate::runtime`]'s
+    /// table: best effort, retried, never fatal.
+    fn pane_env() -> BTreeMap<String, String> {
+        env(&[
+            ("HERDR_ENV", "1"),
+            ("HERDR_PANE_ID", "w1:p1"),
+            ("HERDR_SOCKET_PATH", "/definitely/not/a/socket"),
+        ])
+    }
+
+    fn armed(env: &BTreeMap<String, String>) -> Arc<HerdrBridge> {
+        HerdrBridge::start(env, true, no_lock()).expect("armed")
+    }
+
+    /// Poll the model until it reads `want`, or fail. Real time rather than a paused clock: the
+    /// watcher is a spawned task on a real `interval`, and what is being proven is that the edge
+    /// actually arrives.
+    ///
+    /// [`StateModel::desired`] rather than `last_reported`, and that is load-bearing: the socket
+    /// in these tests does not exist, so every send fails, and a failed send is required to call
+    /// [`StateModel::invalidate_last_report`] (`reporter.rs`) so the de-duplicator stops believing
+    /// herdr holds a value it never received. Polling `last_reported` would therefore race the
+    /// reporter clearing it.
+    async fn settle(bridge: &HerdrBridge, want: cyrup_herdr::schema::PaneAgentState) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            let seen = bridge
+                .model
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .desired()
+                .state;
+            if seen == want {
+                return;
+            }
+            tokio::time::sleep(HUMAN_WAIT_POLL / 2).await;
+        }
+        panic!("the model never reached {want:?}");
+    }
 
     fn env(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
@@ -619,187 +618,20 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------------------
-    // The fleet resync — the two LEVELS, and the privacy rule on the bridge's own path
+    // The fed levels — what a companion's FleetView does to the pane
     // ---------------------------------------------------------------------------------------
 
-    /// An active detached run whose every free-text field carries `sentinel`, and whose workflow
-    /// graph is built by **the production builder**.
-    ///
-    /// `workflow_graph_from_run` (`background/workflow_graph.rs:718`) is the only thing that
-    /// populates `status.telemetry.workflow_graph` in production — its one caller is
-    /// `background/runner_main/status.rs:44-46` — and it sets `label: None` and `phase: None` on
-    /// every `WorkflowTaskSpec` (`:752,:763,:775`), because `SingleStepSpec` carries neither. So a
-    /// published node label is the AGENT NAME or `Step N`, and a fixture that hand-built a node
-    /// with a rich `label` would be asserting over a shape production cannot emit. This one is
-    /// built from a `RunnerStep` list, so what it proves is what a user would see.
-    fn active_run(token: &str, needs_attention: bool, sentinel: &str) -> AsyncRunView {
-        use crate::background::{RunMode, RunState, RunStatus, StepState, StepStatus};
-        use crate::spawn::chain_graph::{RunnerStep, SingleStepSpec};
-
-        let run_id = RunId::from_token(token.to_string());
-        let mut step = StepStatus::pending(AGENT_NAME);
-        step.status = StepState::Running;
-        let mut status = RunStatus::queued(run_id.clone(), RunMode::Chain, None);
-        status.steps = vec![step];
-        status.state = RunState::Running;
-        // The free-text field a careless label would reach for.
-        status.error = Some(sentinel.to_string());
-        if needs_attention {
-            status.telemetry.activity_state = Some(ActivityState::NeedsAttention);
-        }
-        // The production graph, from the production builder. The step's `task` is the user's
-        // prompt, and it is in here precisely so that a builder or a label that started reading it
-        // would be caught.
-        let steps = vec![RunnerStep::SingleStep(SingleStepSpec {
-            worktree: crate::spawn::worktree::WorktreeRequest::Shared,
-            machine: None,
-            skills: None,
-            session_dir: None,
-            agent: AGENT_NAME.to_string(),
-            task: sentinel.to_string(),
-            cwd: None,
-            model: None,
-            tools: None,
-            extensions: None,
-            session_file: None,
-            max_depth_override: None,
-            structured_output_schema: None,
-            output: None,
-            output_path: None,
-            output_mode: None,
-            fast: None,
-            reads: None,
-            acceptance: None,
-            context: None,
-            agent_scope: None,
-            label: None,
-            session_name: None,
-        })];
-        status.telemetry.workflow_graph =
-            Some(crate::background::workflow_graph_from_run(&steps, &status));
-        AsyncRunView {
-            paths: crate::background::RunPaths::for_run(
-                std::path::Path::new("/tmp/async"),
-                std::path::Path::new("/tmp/results"),
-                &run_id,
-            ),
-            status,
-            session_id: None,
-            // pi's `AsyncJobState.description` — the free-text task the launch call supplied.
-            description: Some(sentinel.to_string()),
-            context: None,
-            nested_children: Vec::new(),
-        }
-    }
-
-    /// Poll the model until it reads `want`, or fail. Real time rather than a paused clock: the
-    /// watcher is a spawned task on a real `interval`, and what is being proven is that the edge
-    /// actually arrives.
-    ///
-    /// [`StateModel::desired`] rather than `last_reported`, and that is load-bearing: the socket
-    /// in these tests does not exist, so every send fails, and a failed send is required to call
-    /// [`StateModel::invalidate_last_report`] (`reporter.rs:388`) so the de-duplicator stops
-    /// believing herdr holds a value it never received. Polling `last_reported` would therefore
-    /// race the reporter clearing it. `desired()` is the model's own answer and is exactly what
-    /// the watcher moves: it is `Blocked` only because `set_human_waiting(true)` reached the
-    /// model, so deleting the watcher spawn still leaves this at `Idle` and RED.
-    async fn settle(bridge: &HerdrBridge, want: cyrup_herdr::schema::PaneAgentState) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while std::time::Instant::now() < deadline {
-            let seen = bridge.model.lock().unwrap().desired().state;
-            if seen == want {
-                return;
-            }
-            tokio::time::sleep(HUMAN_WAIT_POLL / 2).await;
-        }
-        panic!("the model never reached {want:?}");
-    }
-
-    fn armed(env: &BTreeMap<String, String>) -> Arc<HerdrBridge> {
-        HerdrBridge::start(env, true, no_lock()).expect("armed")
-    }
-
-    fn pane_env() -> BTreeMap<String, String> {
-        env(&[
-            ("HERDR_ENV", "1"),
-            ("HERDR_PANE_ID", "w1:p1"),
-            ("HERDR_SOCKET_PATH", "/definitely/not/a/socket"),
-        ])
-    }
-
-    /// Publish `fleet` through the PRODUCTION producer and read back what landed on the
-    /// decorative lane.
-    ///
-    /// `sync_fleet` is the function `native_impl.rs` calls, `Reporter::queued_metadata` is an
-    /// observation of the lane `sync_fleet` filled, and there is nothing in between that any test
-    /// here supplies. Assert on this and a mutation to `sync_fleet` is RED; assert on a sibling
-    /// that re-derives the same text and it is not.
-    fn publish(bridge: &HerdrBridge, fleet: &FleetState, project_panes: usize) -> Option<Metadata> {
-        bridge.sync_fleet(fleet, project_panes);
-        bridge.reporter.queued_metadata()
-    }
-
-    /// The rendered strings of a [`Metadata::Set`], joined — what a human reading the pane sees.
-    fn published_strings(metadata: Option<Metadata>) -> String {
-        match metadata {
-            Some(Metadata::Set(text)) => {
-                format!(
-                    "{}\n{}",
-                    text.summary,
-                    text.title_suffix.unwrap_or_default()
-                )
-            }
-            other => panic!("expected a published label, got {other:?}"),
-        }
-    }
-
-    /// **The privacy rule, on the PRODUCTION producer.** `sync_fleet` is what `native_impl.rs`
-    /// calls and `published_text` is the only function that turns runs into published text; this
-    /// drives the first and reads what the second put on the lane.
-    ///
-    /// The run here carries the sentinel in every free-text field a careless label would reach
-    /// for: `status.error` and `AsyncRunView::description` — the latter is pi's
-    /// `AsyncJobState.description`, the task string the launch call supplied, which `label.rs`
-    /// lists under "what may never be sent".
-    ///
-    /// *Gutted by*: reading `AsyncRunView::description` in `RunLabel::from_async_run`; passing
-    /// `run.description.as_deref()` as `RunLabel::new`'s launch label inside `published_text`;
-    /// falling back to the description when the workflow graph yields nothing. Each of those is
-    /// now a mutation of the ONE renderer, so each is RED here.
     #[tokio::test]
-    async fn raw_prompts_never_reach_the_published_label() {
-        const SENTINEL: &str = "REFACTOR-THE-BILLING-SECRETS-PROMPT";
+    async fn a_fed_level_moves_the_pane_and_clearing_it_moves_the_pane_back() {
         let bridge = armed(&pane_env());
-        let fleet = FleetState {
-            tracked_jobs: vec![active_run("r1", false, SENTINEL)],
-            ..FleetState::default()
-        };
-        let published = published_strings(publish(&bridge, &fleet, 0));
-        assert!(
-            !published.contains(SENTINEL),
-            "the prompt reached pane metadata: {published}"
-        );
-        assert!(
-            published.contains("reviewer"),
-            "the agent name is what a production workflow graph can carry: {published}"
-        );
-        bridge.release().await;
-    }
-
-    /// The background level, and the de-duplication across the two lists. `tracked_jobs` (in
-    /// memory) and `history_jobs` (on disk) overlap — pi filters the second against the first
-    /// before concatenating (`fleet.ts:193,199`) — and a run counted twice would keep the pane at
-    /// `working` after it ended.
-    #[tokio::test]
-    async fn a_resync_counts_each_active_run_once() {
-        let bridge = armed(&pane_env());
-        let fleet = FleetState {
-            tracked_jobs: vec![active_run("r1", false, "x"), active_run("r2", false, "x")],
-            // The same two runs, as the on-disk scan also sees them.
-            history_jobs: vec![active_run("r1", false, "x"), active_run("r2", false, "x")],
-            ..FleetState::default()
-        };
-        publish(&bridge, &fleet, 0);
+        bridge.sync_fleet(&FleetView {
+            active_runs: 2,
+            attention: Vec::new(),
+            metadata: Some(MetadataText {
+                summary: "2 subagents".to_string(),
+                title_suffix: None,
+            }),
+        });
         assert_eq!(
             bridge
                 .model
@@ -808,16 +640,20 @@ mod tests {
                 .last_reported()
                 .map(|r| r.state),
             Some(cyrup_herdr::schema::PaneAgentState::Working),
-            "two active detached runs make the pane working"
+            "a fed active count is a level, and a level is enough for `working`"
         );
-        let published = published_strings(bridge.reporter.queued_metadata());
-        assert!(
-            published.contains("2 subagents"),
-            "a run counted twice would read 4: {published}"
+        assert_eq!(
+            bridge.reporter.queued_metadata(),
+            Some(Metadata::Set(MetadataText {
+                summary: "2 subagents".to_string(),
+                title_suffix: None,
+            })),
+            "the companion's rendered text is what goes out, unchanged"
         );
 
-        // Nothing active: the pane goes idle and the label is CLEARED rather than emptied.
-        let cleared = publish(&bridge, &FleetState::default(), 0);
+        // Nothing running any more: `idle`, and the decorative lane is CLEARED, not emptied — pi's
+        // own path (`herdr-status.ts:203-215`), and the reason `metadata: None` is meaningful.
+        bridge.sync_fleet(&FleetView::default());
         assert_eq!(
             bridge
                 .model
@@ -827,53 +663,38 @@ mod tests {
                 .map(|r| r.state),
             Some(cyrup_herdr::schema::PaneAgentState::Idle)
         );
-        assert_eq!(
-            cleared,
-            Some(Metadata::Clear),
-            "pi clears its keys rather than publishing an empty label (herdr-status.ts:203-215)"
-        );
+        assert_eq!(bridge.reporter.queued_metadata(), Some(Metadata::Clear));
         bridge.release().await;
     }
 
-    /// A background run that has tripped the needs-attention heuristic blocks the pane, and the
-    /// summary gains the warning mark. This is the SECOND `blocked` source (the human-wait gate is
-    /// the first and outranks it): a detached runner asking for the human is exactly the thing the
-    /// sidebar has to surface, because nothing else in the UI will.
-    ///
-    /// Gutted by: dropping the `activity_state` read in `sync_fleet`; ordering `is_running` above
-    /// attention in `StateModel::desired`.
+    /// Attention outranks work, and the newest entry is the reason it reports — pi's
+    /// `[...attentionLabels.values()].at(-1)` (`herdr-status.ts:265`), which is why the fed order
+    /// is the companion's to choose and the bridge's to preserve.
     #[tokio::test]
-    async fn a_background_run_needing_attention_blocks_the_pane() {
+    async fn the_last_fed_attention_row_wins() {
         let bridge = armed(&pane_env());
-        let fleet = FleetState {
-            tracked_jobs: vec![active_run("r1", true, "x")],
-            ..FleetState::default()
-        };
-        let published = published_strings(publish(&bridge, &fleet, 0));
+        bridge.sync_fleet(&FleetView {
+            active_runs: 2,
+            attention: vec![
+                RunAttention {
+                    run_id: RunToken::new("r1"),
+                    needs_attention: true,
+                    message: Some("first".to_string()),
+                },
+                RunAttention {
+                    run_id: RunToken::new("r2"),
+                    needs_attention: true,
+                    message: Some("second".to_string()),
+                },
+            ],
+            metadata: None,
+        });
+        let report = bridge.model.lock().unwrap().last_reported().cloned();
         assert_eq!(
-            bridge
-                .model
-                .lock()
-                .unwrap()
-                .last_reported()
-                .map(|r| r.state),
-            Some(cyrup_herdr::schema::PaneAgentState::Blocked),
+            report.as_ref().map(|r| r.state),
+            Some(cyrup_herdr::schema::PaneAgentState::Blocked)
         );
-        assert!(published.contains('⚠'), "{published}");
-        bridge.release().await;
-    }
-
-    /// The project-pane clause renders only once that batch's manager exists. At `0` the clause is
-    /// absent entirely — pi does the same when its own callback is (`herdr-status.ts:162-163`).
-    #[tokio::test]
-    async fn the_project_pane_clause_appears_only_when_there_are_panes() {
-        let bridge = armed(&pane_env());
-        let fleet = FleetState {
-            tracked_jobs: vec![active_run("r1", false, "x")],
-            ..FleetState::default()
-        };
-        assert!(!published_strings(publish(&bridge, &fleet, 0)).contains("pane"));
-        assert!(published_strings(publish(&bridge, &fleet, 2)).contains("2 panes"));
+        assert_eq!(report.and_then(|r| r.message).as_deref(), Some("second"));
         bridge.release().await;
     }
 
@@ -887,13 +708,15 @@ mod tests {
         let before = bridge.model.lock().unwrap().last_reported().cloned();
         bridge.agent_start();
         bridge.set_human_waiting(true);
-        bridge.sync_fleet(
-            &FleetState {
-                tracked_jobs: vec![active_run("r1", true, "x")],
-                ..FleetState::default()
-            },
-            0,
-        );
+        bridge.sync_fleet(&FleetView {
+            active_runs: 1,
+            attention: vec![RunAttention {
+                run_id: RunToken::new("r1"),
+                needs_attention: true,
+                message: None,
+            }],
+            metadata: None,
+        });
         assert_eq!(
             bridge.model.lock().unwrap().last_reported().cloned(),
             before,

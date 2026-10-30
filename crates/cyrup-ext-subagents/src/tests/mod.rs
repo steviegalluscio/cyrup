@@ -31,7 +31,6 @@ mod deadline_checkpoint_runner_integration;
 mod discovery_integration;
 mod dynamic_collect_record_fidelity;
 mod dynamic_group_acceptance_parity;
-mod herdr_shutdown_budget_integration;
 mod intercom_alias_wiring;
 mod management_actions_integration;
 mod management_capabilities_integration;

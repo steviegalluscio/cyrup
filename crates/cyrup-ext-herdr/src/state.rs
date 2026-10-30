@@ -67,14 +67,14 @@ use std::collections::BTreeSet;
 
 use cyrup_herdr::schema::PaneAgentState;
 
-use crate::background::RunId;
+use crate::token::RunToken;
 
 /// The message reported alongside `blocked` when a human dialog is up.
 ///
 /// Short and decorative by design: `message` is free-form on
 /// [`cyrup_herdr::schema::panes::PaneReportAgentParams`], but presentation belongs in
 /// `pane.report_metadata` (`socket-api.mdx:717-718`), so this says *why* the pane is blocked and
-/// nothing more. See [`super::label`] for the half that may carry text.
+/// nothing more. See [`crate::fleet::FleetView`] for the half that may carry text.
 pub const HUMAN_WAIT_MESSAGE: &str = "awaiting approval";
 
 /// The fallback reason for a subagent that needs the human but named no reason — pi's own default
@@ -100,11 +100,11 @@ pub struct StateReport {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunAttention {
     /// The run this row is about.
-    pub run_id: RunId,
+    pub run_id: RunToken,
     /// Whether the run is currently asking for the human.
     pub needs_attention: bool,
     /// The reason, when the run named one. A control-notice *reason token*, never a rendered
-    /// notice body — see [`super::label`] for why that distinction is a privacy rule and not a
+    /// notice body — see [`crate::fleet::FleetView`] for why that distinction is a privacy rule and not a
     /// style preference.
     pub message: Option<String>,
 }
@@ -129,13 +129,13 @@ pub struct StateModel {
     /// Runs asking for the human, in the order they asked — **insertion order, deliberately**.
     ///
     /// pi reports the most recently raised label (`[...attentionLabels.values()].at(-1)`,
-    /// `herdr-status.ts:265`) off a JS `Map`, which is insertion-ordered. A `BTreeMap<RunId, _>`
+    /// `herdr-status.ts:265`) off a JS `Map`, which is insertion-ordered. A `BTreeMap<RunToken, _>`
     /// would order by run id, i.e. by a random UUID, and "the newest thing asking for you" would
     /// become "whichever run id sorts last" — a silent behaviour change disguised as a container
     /// choice.
-    attention: Vec<(RunId, String)>,
+    attention: Vec<(RunToken, String)>,
     /// Runs whose attention the human has already been shown, suppressed until they ask again.
-    acknowledged: BTreeSet<RunId>,
+    acknowledged: BTreeSet<RunToken>,
     /// The last report handed out, for de-duplication. `None` means "herdr has not seen anything
     /// from us", which is also what [`Self::invalidate_last_report`] restores after a failed send.
     last_reported: Option<StateReport>,
@@ -241,7 +241,7 @@ impl StateModel {
     /// un-acknowledges the run, so a run that asks again after being seen is shown again.
     pub fn raise_attention(
         &mut self,
-        run_id: &RunId,
+        run_id: &RunToken,
         message: Option<&str>,
     ) -> Option<StateReport> {
         if self.attention.iter().any(|(id, _)| id == run_id) {
@@ -259,7 +259,7 @@ impl StateModel {
 
     /// A run stopped asking, or ended — pi's async-complete arm (`herdr-status.ts:353-361`),
     /// which drops both the label and the acknowledgement.
-    pub fn clear_attention(&mut self, run_id: &RunId) -> Option<StateReport> {
+    pub fn clear_attention(&mut self, run_id: &RunToken) -> Option<StateReport> {
         self.attention.retain(|(id, _)| id != run_id);
         self.acknowledged.remove(run_id);
         self.settle()
@@ -274,8 +274,8 @@ impl StateModel {
     /// same id starts clean. A run already raised keeps the message it was raised with unless
     /// this resync names one.
     pub fn resync_attention(&mut self, runs: &[RunAttention]) -> Option<StateReport> {
-        let mut next: Vec<(RunId, String)> = Vec::new();
-        let mut active: BTreeSet<RunId> = BTreeSet::new();
+        let mut next: Vec<(RunToken, String)> = Vec::new();
+        let mut active: BTreeSet<RunToken> = BTreeSet::new();
         for run in runs {
             active.insert(run.run_id.clone());
             if !run.needs_attention {
@@ -394,8 +394,8 @@ mod tests {
 
     use super::*;
 
-    fn run(token: &str) -> RunId {
-        RunId::from_token(token.to_string())
+    fn run(token: &str) -> RunToken {
+        RunToken::new(token)
     }
 
     /// The whole ordering in one table: `blocked` beats `working` beats `idle`, over every

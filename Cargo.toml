@@ -23,6 +23,7 @@ members = [
     "crates/cyrup-permission-system",
     "crates/cyrup-intercom",
     "crates/cyrup-herdr",
+    "crates/cyrup-ext-herdr",
     "crates/cyrup-flux",
     "crates/cyrup-mcp",
     "crates/cyrup-acp",
@@ -123,6 +124,7 @@ default-members = [
     "crates/cyrup-permission-system",
     "crates/cyrup-intercom",
     "crates/cyrup-herdr",
+    "crates/cyrup-ext-herdr",
     "crates/cyrup-flux",
     "crates/cyrup-mcp",
     "crates/cyrup-acp",
@@ -194,6 +196,7 @@ cyrup-intercom     = { path = "crates/cyrup-intercom",     version = "0.1.0" }
 # stood here ("either consumer can take it without taking the other") was false, because
 # `crates/cyrup-intercom/Cargo.toml` already depends on `cyrup-ext-subagents`.
 cyrup-herdr        = { path = "crates/cyrup-herdr",        version = "0.1.0" }
+cyrup-ext-herdr    = { path = "crates/cyrup-ext-herdr",    version = "0.1.0" }
 cyrup-flux         = { path = "crates/cyrup-flux",         version = "0.1.0" }
 cyrup-mcp          = { path = "crates/cyrup-mcp",          version = "0.1.0" }
 cyrup-acp          = { path = "crates/cyrup-acp",          version = "0.1.0" }

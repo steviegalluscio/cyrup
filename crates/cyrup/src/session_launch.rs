@@ -204,6 +204,32 @@ fn attach_native_extensions(
             },
         ));
     }
+    // The herdr status bridge, attached BEFORE every companion that feeds it, and before
+    // `subagent_attachment` in particular: the dispatcher delivers `session_start` in registration
+    // order, and the subagents extension's `SessionStart` arm reads the already-armed bridge to
+    // restore the pane's fleet level. Attach it later and that restore silently no-ops.
+    //
+    // It is attached by the same loop as the other companions and gated ONLY by its own runtime
+    // gate (`cyrup_ext_herdr::runtime`'s four-state table: inside a herdr pane, with a UI). It must
+    // NOT ride the subagents install gate: that gate is default OFF
+    // (`cyrup-ext-subagents`'s `gate_on_install`), and tying the pane's sidebar state to it is the
+    // bug — a default cyrup in a herdr pane with a live server reported nothing at all, silently.
+    //
+    // `CYRUP_HERDR_STATUS=0` opts out; `--no-extensions` also drops it, as it drops the other
+    // ambient companions (`NativeExtension::is_ambient`).
+    if builtins.attaches(cyrup_ext_herdr::extension::EXTENSION_ID)
+        && cyrup_ext_herdr::extension::attaches_by_env()
+    {
+        let ext = cyrup_ext_herdr::extension::HerdrStatusExtension::new();
+        builder = builder.with_native_extension(Arc::new(
+            if builtins.is_explicit(cyrup_ext_herdr::extension::EXTENSION_ID) {
+                ext.loaded_explicitly()
+            } else {
+                ext
+            },
+        ));
+    }
+
     // A malformed `intercom/config.json`, or an unusable `PI_INTERCOM_ASK_TIMEOUT_MS`, REFUSES
     // this extension. Both of upstream's equivalents throw from the first two lines of the
     // extension factory itself — `loadConfig()` (`pi-intercom/index.ts:648` @v0.16.0, throwing from
@@ -464,11 +490,18 @@ pub fn build_factory(
 
 /// The names pi's `builtInExtensions` gives its built-in extensions (`extensions/index.ts`), each
 /// an extension resource `builtin:<name>`. cyrup's natives for them load under the same ids.
-pub const BUILTIN_EXTENSIONS: [&str; 4] = [
+///
+/// `herdr-status` is the one entry pi has no name for — cyrup-only, no upstream package behind it —
+/// and it is listed here so it obeys the SAME settings rule as the other four: a
+/// `-builtin:herdr-status` entry in `extensions` turns it off, and `-e builtin:herdr-status`
+/// re-enables it under `--no-extensions`. It writes into the user's own terminal multiplexer, so it
+/// should be switchable the way every other side-effecting built-in is.
+pub const BUILTIN_EXTENSIONS: [&str; 5] = [
     cyrup_llama::LLAMA_PROVIDER_ID,
     cyrup_codemode_runtime::EXTENSION_ID,
     cyrup_tool_search::EXTENSION_ID,
     cyrup_mcp::EXTENSION_ID,
+    cyrup_ext_herdr::extension::EXTENSION_ID,
 ];
 
 /// Which built-in extensions this launch attaches (EXT-094).
@@ -1497,16 +1530,24 @@ mod tests {
     /// `extensionPaths` before `loadFinalExtensionSet` — and its `builtin: true` entries are
     /// `llama.cpp`, `codemode`, `tool-search` and `mcp` (`extensions/index.ts`). Everything else
     /// reaches pi as a file or package path and is listed. cyrup's `builtin:<name>` path is
-    /// [`super::BuiltinSelection`] (EXT-094), the only way those four natives are attached, so the
+    /// [`super::BuiltinSelection`] (EXT-094), the only way those natives are attached, so the
     /// expected state of every loaded native is derived from [`BUILTIN_EXTENSIONS`] — no per-native
     /// table — and the host's answer (`NativeExtension::is_hidden`, read through the startup
     /// `[Extensions]` list) must agree with it.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn every_attached_native_is_hidden_exactly_when_pi_loads_its_counterpart_as_a_builtin() {
+        // The four names pi's `builtInExtensions` carries, plus the one cyrup-only entry that is
+        // listed only so it obeys the same settings rule (`herdr-status`, HERDR-010).
+        let (pi_four, cyrup_only) = BUILTIN_EXTENSIONS.split_at(4);
         assert_eq!(
-            BUILTIN_EXTENSIONS,
+            pi_four,
             ["llama.cpp", "codemode", "tool-search", "mcp"],
             "cyrup's builtin: names are pi's `builtInExtensions` (extensions/index.ts @f1b2e77f5)"
+        );
+        assert_eq!(
+            cyrup_only,
+            [cyrup_ext_herdr::extension::EXTENSION_ID],
+            "the fifth is cyrup-only — no pi name — and is hidden like the rest, so this test's              premise (attached ⇔ hidden when loaded as `builtin:`) covers it too"
         );
         let explicit: Vec<String> = BUILTIN_EXTENSIONS
             .iter()
@@ -1552,6 +1593,36 @@ mod tests {
             assert!(
                 !dropped.iter().any(|i| i == LLAMA_ID),
                 "{mode}: --no-extensions drops the ambient llama.cpp built-in; got {dropped:?}"
+            );
+        }
+    }
+
+    /// HERDR-010 — the herdr pane status built-in is attached in **every** mode, pane or no pane,
+    /// and `--no-extensions` drops it like the other ambient built-ins.
+    ///
+    /// **This is the test that would have caught the bug.** The feed lived inside the subagents
+    /// extension, which a default session never attaches, so nothing armed and nothing ever
+    /// reported — while every unit and integration test on the bridge stayed green, because they
+    /// call `arm` themselves. An extension that is never loaded is invisible to its own tests; only
+    /// the loaded set read off a REAL built session can see the omission. The attach is deliberately
+    /// unconditional on a pane: the runtime gate, not the attach, is what makes a cyrup outside
+    /// herdr inert.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn herdr_status_is_attached_in_every_mode_and_dropped_by_no_extensions() {
+        for (mode, interactive) in [("interactive", true), ("rpc/print/json", false)] {
+            let kept = session_through_build_factory(interactive, false)
+                .await
+                .loaded;
+            assert!(
+                kept.iter().any(|i| i == STATUS_ID),
+                "{mode}: the status built-in attaches in every session, pane or not; got {kept:?}"
+            );
+            let dropped = session_through_build_factory(interactive, true)
+                .await
+                .loaded;
+            assert!(
+                !dropped.iter().any(|i| i == STATUS_ID),
+                "{mode}: --no-extensions drops the ambient status built-in; got {dropped:?}"
             );
         }
     }
@@ -2689,6 +2760,9 @@ mod tests {
     }
 
     /// `ids` without `id`.
+    /// The herdr pane status built-in's id, as a settings entry names it.
+    const STATUS_ID: &str = cyrup_ext_herdr::extension::EXTENSION_ID;
+
     fn without(ids: &[String], id: &str) -> Vec<String> {
         ids.iter().filter(|i| i.as_str() != id).cloned().collect()
     }
@@ -2700,10 +2774,17 @@ mod tests {
     async fn a_settings_entry_disables_only_the_built_in_it_names() {
         let default = launch_with_builtins(None, false, &[]).await.loaded;
         assert!(
-            default.iter().any(|i| i == LLAMA_ID) && default.iter().any(|i| i == MCP_ID),
-            "the control launch loads both built-ins; got {default:?}"
+            default.iter().any(|i| i == LLAMA_ID)
+                && default.iter().any(|i| i == MCP_ID)
+                && default.iter().any(|i| i == STATUS_ID),
+            "the control launch loads the built-ins, herdr-status included; got {default:?}"
         );
-        for id in [LLAMA_ID, MCP_ID] {
+        for id in [
+            LLAMA_ID, MCP_ID,
+            // HERDR-010: the cyrup-only entry obeys the same rule, so a user can turn the pane
+            // feed off without touching anything else.
+            STATUS_ID,
+        ] {
             let settings = format!(r#"{{"extensions": ["-builtin:{id}"]}}"#);
             let run = launch_with_builtins(Some(&settings), false, &[]).await;
             assert_eq!(

@@ -42,7 +42,7 @@
 //!   test at the bottom of this file fails if it ever starts to.
 //! - Any child transcript, tool output, or rendered control-notice body
 //!   (`extension/executor/notices.rs`'s `format_control_notice_message` interpolates the child's
-//!   own text). The *reason token* may go on [`super::state::StateReport::message`]; the rendered
+//!   own text). The *reason token* may go on [`cyrup_ext_herdr::state::StateReport::message`]; the rendered
 //!   body may not go anywhere.
 //!
 //! # Two independent bounds, both applied here
@@ -62,9 +62,13 @@
 //! ([`cyrup_herdr::schema::panes::PaneReportMetadataParams`]) and **nothing here may travel on
 //! `pane.report_agent`**. herdr is explicit that `state` "affects waits, notifications, and
 //! rollups" and that display-only values go through metadata (`socket-api.mdx:717-718`). See
-//! [`super::state`] for the other side.
+//! [`cyrup_ext_herdr::state`] for the other side.
 
-use crate::background::{WorkflowGraphNode, WorkflowGraphSnapshot, WorkflowNodeStatus};
+use cyrup_ext_herdr::MetadataText;
+
+use crate::background::{
+    ActivityState, WorkflowGraphNode, WorkflowGraphSnapshot, WorkflowNodeStatus,
+};
 use crate::tui::fleet_state::AsyncRunView;
 use crate::workflows::{preview_display_text, sanitize_display_text};
 
@@ -169,7 +173,7 @@ fn collect_nodes<'a>(
 
 /// One active run, projected down to exactly the fields that may be published — pi
 /// `HerdrStatusRun` (`herdr-status.ts:28-36`) minus its attention fields, which belong to
-/// [`super::state`] rather than to the label.
+/// [`cyrup_ext_herdr::state`] rather than to the label.
 ///
 /// The `task_label` is private and there is no setter: the only ways to obtain one are
 /// [`Self::new`] and [`Self::from_async_run`], both of which route through
@@ -238,16 +242,6 @@ impl RunLabel {
     }
 }
 
-/// The two display-only strings the bridge publishes through `pane.report_metadata`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MetadataText {
-    /// The `summary` token and the `idle`/`working`/`done` state labels — pi's `label(true)`
-    /// (`herdr-status.ts:156-167`), which all three keys share (`:224-226`).
-    pub summary: String,
-    /// The `title-suffix` token — pi's `titleSuffix()` (`herdr-status.ts:169-176`).
-    pub title_suffix: Option<String>,
-}
-
 /// Render the pane's metadata text, or `None` when nothing is running.
 ///
 /// `None` is pi's clear path (`herdr-status.ts:203-215`): with no active runs the bridge does not
@@ -260,7 +254,7 @@ pub struct MetadataText {
 ///
 /// `attention` is how many runs are asking for the human; any non-zero count adds the warning
 /// mark. The *reason* is not rendered here — it travels on
-/// [`super::state::StateReport::message`], because it is semantic and this is presentation.
+/// [`cyrup_ext_herdr::state::StateReport::message`], because it is semantic and this is presentation.
 #[must_use]
 pub fn metadata_text(
     runs: &[RunLabel],
@@ -347,6 +341,28 @@ fn active_agent_names(runs: &[RunLabel]) -> Vec<String> {
 /// (upstream reverses the map's insertion order and takes the first hit).
 fn active_task_label(runs: &[RunLabel]) -> Option<&str> {
     runs.iter().rev().find_map(RunLabel::task_label)
+}
+
+/// Turn the active runs into the text that goes on the pane — **the only function that does**, and
+/// it has exactly one caller: [`super::fleet_view`], which is what `native_impl.rs` feeds to the
+/// bridge.
+///
+/// One producer is the privacy rule's structural half. There used to be two — the bridge's own
+/// `sync_fleet` and a `metadata_for` sibling that re-derived the same text for the tests — and a
+/// mutation applied to the production one (passing `AsyncRunView::description`, pi's free-text
+/// launch task, as a launch label) left the whole suite green because the test asserted on the
+/// sibling. A second renderer is a second place for the rule to be broken, so there is one.
+#[must_use]
+pub fn published_text(active: &[&AsyncRunView], project_panes: usize) -> Option<MetadataText> {
+    let attention = active
+        .iter()
+        .filter(|run| run.status.telemetry.activity_state == Some(ActivityState::NeedsAttention))
+        .count();
+    let labels: Vec<RunLabel> = active
+        .iter()
+        .map(|run| RunLabel::from_async_run(run))
+        .collect();
+    metadata_text(&labels, project_panes, attention)
 }
 
 #[cfg(test)]

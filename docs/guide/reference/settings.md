@@ -236,8 +236,9 @@ analytics, the update check and the model-catalog refresh together. Setting `ena
 Entries in `skills`, `prompts` and `themes` may carry a leading `+`, `-` or `!` marker. `cyrup
 config` writes those markers to enable and disable individual resources without deleting the path.
 
-The built-in extensions are named `builtin:llama.cpp`, `builtin:codemode`, `builtin:tool-search`
-and `builtin:mcp` in `extensions`. They load by default; `"extensions": ["-builtin:llama.cpp"]` in
+The built-in extensions are named `builtin:llama.cpp`, `builtin:codemode`, `builtin:tool-search`,
+`builtin:mcp` and — cyrup-only, with no pi counterpart — `builtin:herdr-status` (the [herdr pane
+status feed](environment.md)) in `extensions`. They load by default; `"extensions": ["-builtin:llama.cpp"]` in
 the global settings disables one. `--no-extensions` disables them too, and `-e builtin:<name>`
 loads one explicitly, also under `--no-extensions` (except `codemode`, which that flag still
 drops). Two parts of pi's behaviour are not ported yet: a `+builtin:<name>` or

@@ -1,0 +1,30 @@
+[package]
+name = "cyrup-ext-herdr"
+description = "The herdr pane status bridge: cyrup's state in herdr's Agents sidebar, attached whenever cyrup runs inside a herdr pane"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cyrup-core = { workspace = true }
+# The workspace's ONE herdr client (pinned to the herdr `v0.9.1` tag). This crate is the cyrup half
+# of the status bridge — the state machine, the reporter task, the event consumer — and it reports
+# through that client's typed method surface rather than growing a second NDJSON client beside it.
+cyrup-herdr = { workspace = true }
+# `NativeExtension`/`InitApi`/`HostCtx`/`HostServices`/`HumanInteractionLock`: the built-in that
+# arms the bridge on `session_start` and feeds it host events, and the one session-scoped human-wait
+# slot it watches.
+cyrup-ext = { workspace = true, features = ["wasm-host"] }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = "0.1.44"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = { workspace = true }

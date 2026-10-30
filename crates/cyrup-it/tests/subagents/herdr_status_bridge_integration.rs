@@ -3,7 +3,7 @@
 //! This is the test that answers "does the maintainer's sidebar actually say which pane is blocked
 //! on them?". It binds a `UnixListener` that speaks herdr's real framing, points
 //! `HERDR_SOCKET_PATH` at it, arms the **production** bridge
-//! (`cyrup_ext_subagents::herdr::HerdrBridge::start` — the same function
+//! (`cyrup_ext_herdr::HerdrBridge::start` — the same function
 //! `native_impl.rs`'s `SessionStart` arm calls), drives real cyrup lifecycle edges through it, and
 //! asserts on the bytes the server received.
 //!
@@ -41,8 +41,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use cyrup_ext::host::{HostServices, HumanInteractionGuard, HumanInteractionLock};
-use cyrup_ext_subagents::herdr::runtime::{HUMAN_WAIT_POLL, HerdrBridge};
-use cyrup_ext_subagents::herdr::{arm_in, bridge, shutdown};
+use cyrup_ext_herdr::runtime::{HUMAN_WAIT_POLL, HerdrBridge};
+use cyrup_ext_herdr::{arm_in, bridge, shutdown};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 
@@ -175,10 +175,7 @@ impl FakeHerdr {
     /// The same pane, with the sidebar projection opted in.
     fn pane_env_with_agent_view(&self, pane_id: &str) -> BTreeMap<String, String> {
         let mut env = self.pane_env(pane_id);
-        env.insert(
-            cyrup_ext_subagents::herdr::AGENT_VIEW_ENV.to_string(),
-            "1".to_string(),
-        );
+        env.insert(cyrup_ext_herdr::AGENT_VIEW_ENV.to_string(), "1".to_string());
         env
     }
 
@@ -347,7 +344,7 @@ async fn a_human_wait_puts_the_pane_at_blocked() {
         .find(|call| call["params"]["state"] == "blocked")
         .expect("a blocked report");
     assert_eq!(
-        blocked["params"]["source"], "cyrup:subagents",
+        blocked["params"]["source"], "cyrup:status",
         "a herdr:<known-agent> source has its state SILENTLY DROPPED \
          (tmp/herdr/src/agent_resume.rs:100-113)"
     );
@@ -556,7 +553,7 @@ async fn seq_is_monotonic_and_the_source_is_stable() {
             continue;
         };
         assert_eq!(
-            call["params"]["source"], "cyrup:subagents",
+            call["params"]["source"], "cyrup:status",
             "every sequenced report shares ONE source — herdr caps a pane at 32 for its lifetime"
         );
         assert!(seq > previous, "seq {seq} must exceed {previous}");
@@ -599,7 +596,7 @@ async fn a_clean_shutdown_releases_the_pane_last() {
     .await;
 
     let release = fake.calls("pane.release_agent").pop().unwrap();
-    assert_eq!(release["params"]["source"], "cyrup:subagents");
+    assert_eq!(release["params"]["source"], "cyrup:status");
     assert_eq!(release["params"]["agent"], "cyrup");
     assert_eq!(release["params"]["pane_id"], "w1:p1");
 
@@ -908,7 +905,7 @@ async fn a_session_shutdown_releases_the_bridge_in_the_global_slot() {
 /// (`socket-api.mdx:418-495`) and they answer the question this bridge exists for: *which pane
 /// needs me first*. The projection is a SORT with no filter — attention, then the most recent
 /// state transition — because the view is server-wide and a filter would hide the user's other
-/// agents from their own sidebar; see `cyrup_ext_subagents::herdr::view`.
+/// agents from their own sidebar; see `cyrup_ext_herdr::view`.
 ///
 /// Driven through the production arm (`arm_in`, which is `SessionStart`'s call) so the whole
 /// chain is real: the env gate, `HerdrBridge::start`, `Reporter::spawn`, the drain, and the bytes
@@ -937,7 +934,7 @@ async fn the_opt_in_sidebar_projection_is_installed_and_cleared() {
 
     let set = fake.calls("agent.view.set");
     assert_eq!(set.len(), 1, "installed once, not per edge");
-    assert_eq!(set[0]["params"]["source"], "cyrup:subagents");
+    assert_eq!(set[0]["params"]["source"], "cyrup:status");
     assert_eq!(set[0]["params"]["label"], "cyrup fleet");
     assert_eq!(
         set[0]["params"]["sort"],
@@ -961,7 +958,7 @@ async fn the_opt_in_sidebar_projection_is_installed_and_cleared() {
     let cleared = fake.calls("agent.view.clear");
     assert_eq!(cleared.len(), 1);
     assert_eq!(
-        cleared[0]["params"]["source"], "cyrup:subagents",
+        cleared[0]["params"]["source"], "cyrup:status",
         "the clear is ownership-scoped, so a view another program installed in the meantime \
          survives this session's shutdown (socket-api.mdx:494)"
     );

@@ -1,137 +1,105 @@
-//! The herdr status bridge: cyrup's fleet state in herdr's sidebar. See [`herdr`](crate::herdr).
+//! The subagents companion's half of the herdr status bridge: what a fleet looks like to the
+//! bridge, and the text it publishes.
 //!
-//! The herdr status bridge — cyrup's fleet in herdr's sidebar.
+//! The bridge itself — gate, state machine, reporter task, event consumer, the built-in that arms
+//! it — lives in [`cyrup_ext_herdr`], and it is attached whether or not this extension is. What is
+//! here is the two things only this crate can supply:
 //!
-//! When cyrup runs inside a [herdr](https://github.com/herdr) pane, this module is what makes the
-//! pane's row in herdr's Agents sidebar tell the truth: **who is working, who is blocked waiting
-//! on you, who is done.** The transport lives in the workspace's one herdr client,
-//! [`cyrup_herdr`]; everything here is the cyrup half — the state machine, the label rules, and
-//! (in later files) the reporter task that puts them on the wire.
+//! - [`fleet_view`] — the run-level rules: which runs count as work (pi's `Queued | Running`,
+//!   de-duplicated across the in-memory and on-disk lists) and which are asking for the human.
+//! - [`label`] — the presentation, and **the privacy rule**: raw prompts and child output never
+//!   enter pane metadata.
 //!
-//! # The two verbs, and why they are never collapsed
+//! The direction matters. This crate feeds a [`cyrup_ext_herdr::fleet::FleetView`] to a bridge it
+//! does not own; the bridge never reaches in here. That is what lets the feed exist in a session
+//! where the subagents extension was never attached — the default, until
+//! `CYRUP_SUBAGENTS` or a `subagents/config.json` opts in
+//! (`crate::extension::host::registration`'s `gate_on_install`).
 //!
-//! herdr separates *semantic state* from *presentation*, and says so on the method:
+//! # What this crate must NOT drive
 //!
-//! > `state` carries semantic agent state and affects waits, notifications, and rollups. Report
-//! > display-only values separately through metadata.
-//!
-//! — `tmp/herdr/docs/preview/website/src/content/docs/socket-api.mdx:717-718` (herdr @ `d59d060`,
-//! v0.9.1).
-//!
-//! So [`state`] produces a [`state::StateReport`] destined for `pane.report_agent`
-//! ([`cyrup_herdr::schema::panes::PaneReportAgentParams`]) and [`label`] produces a
-//! [`label::MetadataText`] destined for `pane.report_metadata`
-//! ([`cyrup_herdr::schema::panes::PaneReportMetadataParams`]). A refactor that folds the two into
-//! one envelope breaks herdr's waits and rollups while still *looking* right on screen, which is
-//! why both modules carry tests that fail on exactly that.
-//!
-//! # The identity this bridge reports under
-//!
-//! [`SOURCE`] and [`AGENT`] are not cosmetic — herdr routes on both, and the wrong pair is
-//! silently dropped rather than rejected. See each constant for the rungs it clears.
-//!
-//! # Module map
-//!
-//! | file | what it owns |
-//! |---|---|
-//! | [`state`] | the pure lifecycle → [`cyrup_herdr::schema::PaneAgentState`] machine: refcounted `working`, and `blocked` from the human-wait gate |
-//! | [`label`] | the metadata text, and **the privacy rule**: raw prompts never enter pane metadata |
-//! | [`reporter`] | the tokio task: two coalescing lanes, wire-time `seq`, the TTL refresh, the release |
-//! | [`consumer`] | `events.subscribe` + `session.snapshot` over [`cyrup_herdr::HerdrClient::bootstrap`]: pane-gone, and re-asserting a contradicted state |
-//! | [`runtime`] | the four-state gate, the one process-wide handle, and the entry points `native_impl.rs` calls |
-//! | [`view`] | `[CYRUP-EXCEEDS-UPSTREAM]` the OPT-IN `agent.view.set` projection: herdr's own sidebar, ordered by attention |
-//!
-//! The first two are pure: no clock, no I/O, no socket. Every input is a method call and every
-//! output is a value, which is what lets the transition table and the privacy rule be pinned by
-//! unit tests that need neither a herdr nor a socket.
-//!
-//! # Where the live half plugs in
-//!
-//! [`runtime::arm`] on `HostEvent::SessionStart`, [`runtime::shutdown`] on `SessionShutdown`, and
-//! [`runtime::bridge`] on every edge in between
-//! (`crates/cyrup-ext-subagents/src/extension/host/native_impl.rs`). Outside a herdr pane
-//! [`runtime::arm`] answers `None` and every one of those edges is one `Option` test — see
-//! [`runtime`]'s four-state table.
-//!
-//! # `kill` is already covered, and this module installs no handler
-//!
-//! herdr never reclaims agent state from a `cyrup:` source — no TTL
-//! (`tmp/herdr/src/terminal/state.rs:18-25`), and a process-exit override that only fires for an
-//! agent herdr can name (`:401-407`, and `"cyrup"` deliberately is not one, see [`AGENT`]). So a
-//! cyrup that dies without releasing strands a `working` or `blocked` row until herdr restarts,
-//! and the AUG called for a SIGTERM/SIGHUP guard here.
-//!
-//! **It would have been a regression.** `crates/cyrup/src/signals.rs:212-240,317-330` already
-//! installs SIGTERM and SIGHUP for every host, and on the interactive host — the only host this
-//! bridge ever arms on ([`runtime`]'s second row) — `first_delivery_exit_code` returns `None`
-//! (`signals.rs:224-230`), so the handler fires the cancel token, the run loop breaks, and `main`
-//! disposes the runtime, which fans `session_shutdown{quit}` out to every extension. The site that
-//! carries that last step is `crates/cyrup/src/main.rs:729-731` — `runtime.dispose().await`
-//! immediately after `run_interactive` returns, commented *"Runs even when the TUI loop errored
-//! out"*. That reaches this crate's
-//! `HostEvent::SessionShutdown` arm, which calls [`shutdown`] and releases the pane. A second
-//! listener here would exit the process out from under that teardown — the exact race
-//! `signals.rs:86-90` was rewritten to remove.
-//!
-//! What is genuinely uncovered is a SIGKILL and a *second* signal delivery, which hard-exits
-//! (`signals.rs:300-305`). Neither reaches any handler in any language. The presentation half of
-//! that is bounded by [`reporter::METADATA_TTL_MS`]; the state half is not, and is the honest
-//! residual of this feature.
+//! The root-turn edges. `agent_start`/`agent_end` are fed once, by `cyrup_ext_herdr`'s own
+//! built-in, onto a saturating refcount; a second feeder of the same turn would leave the pane at
+//! `working` until both balanced. What this crate feeds is levels ([`fleet_view`]), its own
+//! foreground run edges (`foreground_run_started`/`foreground_run_finished`), and the attention
+//! rows its runs raise.
 
-pub mod consumer;
 pub mod label;
-pub mod reporter;
-pub mod runtime;
-pub mod state;
-pub mod view;
+
+use cyrup_ext_herdr::{FleetView, RunAttention};
+
+use crate::background::{ActivityState, RunId};
+use crate::tui::fleet_state::{AsyncRunView, FleetState};
+
+// Re-exported so the bridge is still reachable as `crate::herdr::*` from this crate and from its
+// integration tests, after the move to `cyrup-ext-herdr`. `arm`/`arm_in` are here for the tests
+// only — production arming is `cyrup_ext_herdr::extension`'s built-in, never this crate.
+pub use cyrup_ext_herdr::{
+    AGENT, AGENT_VIEW_ENV, AGENT_VIEW_LABEL, HerdrBridge, RunToken, SOURCE, arm, arm_in, bridge,
+    reporter, runtime, shutdown, state,
+};
 
 pub use label::{
     MAX_TASK_LABEL_CHARS, MAX_TITLE_TASK_CHARS, MAX_WORKFLOW_LABEL_DEPTH, MAX_WORKFLOW_LABEL_NODES,
-    MetadataText, RunLabel, bounded_task_label, metadata_text, workflow_task_label,
+    RunLabel, bounded_task_label, metadata_text, workflow_task_label,
 };
-pub use reporter::{METADATA_REFRESH, METADATA_TTL_MS, Metadata, Reporter, SeqCounter};
-pub use runtime::{HerdrBridge, arm, arm_in, bridge, shutdown};
-pub use state::{RunAttention, StateModel, StateReport};
-pub use view::{AGENT_VIEW_ENV, AGENT_VIEW_LABEL};
 
-/// The authority name every report from this bridge carries, for the whole life of the process.
+/// Every active detached background run in `fleet`, de-duplicated by run id.
 ///
-/// **Not a `herdr:` prefix, and not by taste.** herdr reserves that prefix for its own registered
-/// integrations and treats a `herdr:<known-agent>` pair as a *drop*:
-/// `is_reserved_native_state_source` (`tmp/herdr/src/agent_resume.rs:100-113`) matches nine pairs
-/// — `("herdr:claude","claude")`, `("herdr:codex","codex")`, `("herdr:copilot","copilot")`,
-/// `("herdr:devin","devin")`, `("herdr:droid","droid")`, `("herdr:qodercli","qodercli")`,
-/// `("herdr:qwen","qwen")`, `("herdr:cursor","cursor")`, `("herdr:grok","grok")` — and for those
-/// the reported **state is silently discarded**, only the session reference being kept
-/// (`tmp/herdr/src/app/actions.rs:1536-1565`). The neighbouring privilege table,
-/// `full_lifecycle_hook_authority` (`tmp/herdr/src/detect/mod.rs:327-337`), is the one pi's host
-/// process is registered in as `("herdr:pi","pi")`; cyrup is in neither, so it reports as itself.
-///
-/// The spelling is inside herdr's own source charset — `[A-Za-z0-9:._-]`, at most 80 characters
-/// (`socket-api.mdx:794`) — and it is **stable**, which is load-bearing twice over: herdr's
-/// sequence ledger is keyed by source (`accept_hook_report`, `tmp/herdr/src/terminal/state.rs:707-709`)
-/// and a pane accepts sequenced reports from at most 32 distinct sources for its whole lifetime,
-/// with clearing and expiry releasing nothing (`socket-api.mdx:798`). A per-report source would
-/// burn that budget in under a minute.
-pub const SOURCE: &str = "cyrup:subagents";
+/// `tracked_jobs` (in memory) and `history_jobs` (on disk, not tracked by this process) overlap —
+/// pi filters the second against the first before concatenating (`fleet.ts:193,199`) — and a run
+/// counted twice would keep the pane at `working` after it ended.
+fn active_background_runs(fleet: &FleetState) -> Vec<&AsyncRunView> {
+    let mut seen: Vec<&RunId> = Vec::new();
+    let mut active: Vec<&AsyncRunView> = Vec::new();
+    for run in fleet.tracked_jobs.iter().chain(fleet.history_jobs.iter()) {
+        if !run.is_active() {
+            continue;
+        }
+        if seen.iter().any(|id| **id == run.status.run_id) {
+            continue;
+        }
+        seen.push(&run.status.run_id);
+        active.push(run);
+    }
+    active
+}
 
-/// The agent label every report from this bridge carries.
+/// Turn this crate's fleet projection into the [`FleetView`] the bridge accepts.
 ///
-/// herdr normalises an unknown label through verbatim after trimming
-/// (`normalize_reported_agent_label`, `tmp/herdr/src/app/api_helpers.rs:191-200`), and `"cyrup"`
-/// *is* unknown: `parse_agent_label` (`tmp/herdr/src/detect/mod.rs:188-228`) is a closed table of
-/// known agent names and cyrup is not in it. That is deliberate rather than unlucky — an unknown
-/// label makes `known_agent_label_conflicts_with_detected_agent`
-/// (`tmp/herdr/src/terminal/state.rs:1629-1635`) unreachable, so herdr's screen detection can
-/// never overrule what cyrup reports about itself.
+/// **The one place the run-level rules are stated**, and the only function in this crate that
+/// turns runs into published text ([`label::published_text`], one renderer, one producer). The
+/// bridge's `HerdrBridge::sync_fleet` takes the result; it never sees an [`AsyncRunView`].
 ///
-/// The price of that is stated here because it shapes the release path a later file owns:
-/// `hook_authority_is_effective` (`tmp/herdr/src/terminal/state.rs:1812-1817`) short-circuits to
-/// `true` for a non-`full_lifecycle` source, agent state carries **no TTL at all**
-/// (`HookAuthority`'s six fields are `source`, `agent_label`, `state`, `message`,
-/// `reported_at` and `session_ref` — a stamp of WHEN, and no expiry to compare it against;
-/// `tmp/herdr/src/terminal/state.rs:18-25`),
-/// and the process-exit override only fires for a *named* agent
-/// (`tmp/herdr/src/terminal/state.rs:401-407`). A cyrup that dies without releasing strands its
-/// pane at `working` or `blocked` **permanently**. Releasing is correctness here, not hygiene.
-pub const AGENT: &str = "cyrup";
+/// `project_panes` is the count of project panes this session has opened; `0` renders no pane
+/// clause at all, exactly as pi does when its callback is absent (`herdr-status.ts:162-163`).
+#[must_use]
+pub fn fleet_view(fleet: &FleetState, project_panes: usize) -> FleetView {
+    let active = active_background_runs(fleet);
+    let attention: Vec<RunAttention> = active
+        .iter()
+        .map(|run| RunAttention {
+            run_id: RunToken::new(run.status.run_id.to_string()),
+            needs_attention: run.status.telemetry.activity_state
+                == Some(ActivityState::NeedsAttention),
+            message: None,
+        })
+        .collect();
+    FleetView {
+        active_runs: active.len(),
+        attention,
+        metadata: label::published_text(&active, project_panes),
+    }
+}
+
+/// The run identity the bridge keys attention on, from this crate's [`RunId`].
+///
+/// The bridge must not name a subagents type, so the identity crosses as an opaque
+/// [`RunToken`]; this is the one place the two are related.
+#[must_use]
+pub fn run_token(run_id: &RunId) -> RunToken {
+    RunToken::new(run_id.to_string())
+}
+
+#[cfg(test)]
+mod publish_tests;

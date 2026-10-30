@@ -1,6 +1,6 @@
 //! The reporter task — the only thing in this crate that writes to herdr's socket.
 //!
-//! Everything above it ([`super::state`], [`super::label`]) is pure. This file is where a
+//! Everything above it ([`super::state`], [`crate::fleet::FleetView`]) is pure. This file is where a
 //! `(state, message)` pair and a `(summary, title-suffix)` pair become
 //! `pane.report_agent` and `pane.report_metadata` calls on
 //! [`cyrup_herdr::HerdrClient`], and where a session's end becomes `pane.release_agent`.
@@ -65,7 +65,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 
-use super::label::MetadataText;
+use super::fleet::MetadataText;
 use super::state::{StateModel, StateReport};
 use super::{AGENT, SOURCE};
 

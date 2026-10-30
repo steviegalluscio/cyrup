@@ -1680,7 +1680,7 @@ impl SubagentExecutor {
 
         // The herdr status bridge's foreground refcount. ONE call per RUN, never per child: a
         // parallel run with nine children is ONE run in flight, which is the whole point of the
-        // refcount (`crate::herdr::state`'s module doc). Paired with the
+        // refcount (`cyrup_ext_herdr::state`'s module doc). Paired with the
         // `foreground_run_finished` in `settle_foreground_run` below, which is the ONE place a
         // run's control surface is torn down — so the count cannot leak on a failed, interrupted
         // or stopped run.
@@ -1748,7 +1748,7 @@ impl SubagentExecutor {
         // is unconditional and idempotent: a run that settles while raised must not leave the
         // pane amber, and a run that was never raised is a no-op.
         if let Some(bridge) = crate::herdr::bridge() {
-            bridge.clear_attention(run_id);
+            bridge.clear_attention(&crate::herdr::run_token(run_id));
             bridge.foreground_run_finished();
         }
 

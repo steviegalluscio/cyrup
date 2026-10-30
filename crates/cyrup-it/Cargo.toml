@@ -116,6 +116,7 @@ cyrup-tui               = { workspace = true, features = ["scrollback-accumulato
 cyrup-intercom          = { workspace = true }
 cyrup-permission-system = { workspace = true }
 cyrup-ext-subagents     = { workspace = true }
+cyrup-ext-herdr        = { workspace = true }
 # The `pi-mcp-adapter` port (gap-analysis 13). `tests/mcp/` builds a REAL `AgentSession` with the
 # adapter attached the way `crates/cyrup/src/main.rs` attaches it, so it needs the extension type by
 # name. A dev edge only — this crate has no `[lib]`/`[dependencies]`, so it cannot reach the

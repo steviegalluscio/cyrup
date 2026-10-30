@@ -99,7 +99,7 @@ pub const HERDR_COMMAND_FAILED: &str = "Herdr command failed.";
 
 /// The `source` every report this subtree makes is attributed to.
 ///
-/// Distinct from the status bridge's `cyrup:subagents` (`crate::herdr::SOURCE`): herdr scopes
+/// Distinct from the status bridge's `cyrup:status` (`cyrup_ext_herdr::SOURCE`): herdr scopes
 /// reporting authority per `source` (`tmp/herdr/src/app/api/panes.rs:1786-1790`), so an inspector
 /// pane reporting under the bridge's name would contend with the bridge for the SAME authority on
 /// a different pane's behalf. They are two reporters and they say so.

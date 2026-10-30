@@ -149,6 +149,7 @@ mod control_notice_pipeline_integration;
 // VL-S6's sibling — the herdr status bridge drives a real `UnixListener` and a real socket
 // handshake, which no in-process test can stand in for. `#[cfg(unix)]` is an INNER attribute
 // already on that file, so a bare `mod` line is correct here.
+mod herdr_release_shutdown_budget_integration;
 mod herdr_status_bridge_integration;
 mod native_supervisor_channel_integration;
 mod result_intercom_delivery_integration;

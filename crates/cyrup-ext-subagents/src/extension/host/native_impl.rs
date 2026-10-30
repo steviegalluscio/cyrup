@@ -16,37 +16,6 @@ use crate::extension::tool::text::SUBAGENT_TOOL_DESCRIPTION;
 use crate::extension::wait_tool::WaitTool;
 use crate::registration::slash_commands::{SLASH_COMMANDS, SlashCommandName};
 
-/// How long the `SessionShutdown` handler waits for the herdr pane release AFTER the rest of the
-/// teardown has run.
-///
-/// **This exists because the herdr release and the dispatcher's budget used to be the same five
-/// seconds.** `crate::herdr::shutdown()` is bounded by `crate::herdr::reporter::RELEASE_TIMEOUT`
-/// (5 s), the handler runs under [`cyrup_ext::dispatch::DEFAULT_INVOKE_BUDGET`] (5 s), and the
-/// dispatcher enforces that budget by DROPPING the handler future (`Dispatcher::invoke_contained`).
-/// So a herdr that accepted the connection and then stopped answering consumed the entire budget
-/// on the arm's FIRST statement, and every disposal below it — the supervisor channel, the
-/// watchdog, the wait subscriptions, the scheduled runs, `teardown_session`, both widget slots —
-/// was silently dropped. Nothing logged, nothing failed: the statements simply never ran.
-///
-/// The arm now SPAWNS the release, runs the in-process teardown, and joins here. The release still
-/// goes out first and is still awaited; what changed is that the waiting happens after the work
-/// that cannot hang, and is bounded by this smaller slice. The `const` assertion below is the
-/// coupling: the join must leave at least as much of the budget again for everything above it, so
-/// shrinking [`cyrup_ext::dispatch::DEFAULT_INVOKE_BUDGET`] is a compile error here rather than a
-/// teardown that quietly stops happening.
-///
-/// A join that times out does NOT abort the release — the task keeps draining on the runtime until
-/// `RELEASE_TIMEOUT` ends it, which on the `/quit` path is inside `main`'s
-/// `runtime.dispose().await` (`crates/cyrup/src/main.rs:729-731`).
-const HERDR_RELEASE_JOIN_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
-
-const _: () = assert!(
-    HERDR_RELEASE_JOIN_BUDGET.as_millis() * 2
-        < cyrup_ext::dispatch::DEFAULT_INVOKE_BUDGET.as_millis(),
-    "the herdr release join must leave at least as much of the dispatch budget again for the rest \
-     of the SessionShutdown teardown"
-);
-
 #[async_trait]
 impl NativeExtension for SubagentsExtension {
     fn id(&self) -> ExtensionId {
@@ -398,11 +367,12 @@ impl NativeExtension for SubagentsExtension {
                     crate::discovery::runtime_agent_events::RUNTIME_AGENT_DISPOSE_EVENT,
                 );
 
-                // The herdr status bridge's two run-ended edges (`src/herdr/`). `subscribe_bus` is
-                // `InitApi`-only (`cyrup-ext/src/native.rs:466`), so they are declared here even
-                // though whether they are ACTED on is decided per-session by
-                // `herdr::runtime::arm` — outside a herdr pane every delivery is one `Option`
-                // test (`herdr::runtime::bridge()` → `None`) and nothing else.
+                // The herdr status bridge's two run-ended edges. `subscribe_bus` is `InitApi`-only
+                // (`cyrup-ext/src/native.rs:466`), so they are declared here even though whether
+                // they are ACTED on is decided per-session by whether a bridge is armed at all —
+                // which is `cyrup_ext_herdr`'s built-in's decision, not this crate's. Outside a
+                // herdr pane every delivery is one `Option` test (`crate::herdr::bridge()` →
+                // `None`) and nothing else.
                 //
                 // Both topics are owned by their emitter, as `background/watch/observer.rs:81-88`
                 // argues: this is a subscriber, and it names the constants rather than the
@@ -423,12 +393,9 @@ impl NativeExtension for SubagentsExtension {
                     cyrup_ext::EventKind::TurnEnd,
                     cyrup_ext::EventKind::ToolResult,
                     cyrup_ext::EventKind::AgentEnd,
-                    // The herdr status bridge's root-turn edge. This is the one pi's subagents
-                    // bridge does NOT have — its pane looks idle while the host itself is
-                    // thinking, because only async children feed it — and it is what makes the
-                    // pane say `working` while cyrup is working. `[CYRUP-EXCEEDS-UPSTREAM]`; the
-                    // premise is on `herdr::state::StateModel::agent_start`.
-                    cyrup_ext::EventKind::AgentStart,
+                    // `AgentStart` deliberately ABSENT: the herdr status bridge's root-turn edge is
+                    // fed by `cyrup_ext_herdr`'s own built-in, and a second feeder of one turn
+                    // would pin the pane at `working` (its `edge_depth` is a refcount).
                     cyrup_ext::EventKind::SessionBeforeSwitch,
                     cyrup_ext::EventKind::SessionBeforeFork,
                     cyrup_ext::EventKind::SessionCompact,
@@ -628,46 +595,38 @@ impl NativeExtension for SubagentsExtension {
                 self.refresh_fleet_status_widget(&ctx.cwd, ctx.has_ui, ctx.mode)
                     .await;
 
-                // The herdr status bridge, armed HERE — after `refresh_fleet_status_widget` and
-                // BEFORE `emit_rpc_ready` below. That is pi's own order, which the comment on the
-                // `emitReady` block already records: *"the tail of its own `session_start`
-                // handler, after the herdr bridge and before `supervisorChannel.start()`"*.
+                // The herdr status bridge is ARMED by its own built-in —
+                // `cyrup_ext_herdr::extension::HerdrStatusExtension`, attached with the other
+                // built-ins in `crates/cyrup/src/session_launch.rs` — and NOT here.
                 //
-                // `arm` answers `None` unless this process is inside a herdr pane
-                // (`HERDR_ENV=1` AND a non-empty `HERDR_PANE_ID`, the conjunction herdr's
-                // `PaneLaunchIdentity::OmitPane` makes load-bearing) AND the session has a UI.
-                // Outside a pane nothing is constructed: no socket, no task, no signal handler.
-                // See `crate::herdr::runtime`'s four-state table.
+                // That move is the fix for a bug this crate could not see. The subagents extension
+                // is opt-in and default OFF (`registration::gate_on_install`: `CYRUP_SUBAGENTS` or
+                // a `subagents/config.json`), so in a default session `init` never ran, no host
+                // event reached this arm, `arm` was never called, and a cyrup sitting inside a
+                // herdr pane with a LIVE server reported nothing at all — herdr's
+                // `session.snapshot` answered `agents: []` with every pane
+                // `agent_status: "unknown"`. The feed the README promises silently required
+                // installing a different feature, and not one log line said so, because the code
+                // that would have logged it lived in the extension that was not loaded.
                 //
-                // The human-wait input is `HostServices::human_interaction_lock()` — the ONE
-                // session-scoped slot every companion that opens a human prompt acquires first
-                // (`cyrup-ext/src/host/services.rs`'s `HumanInteractionLock`). It is reached off
-                // the SAME backend Arc `load_native_with_services` clones into every native
-                // (`cyrup-session-svc/src/builder.rs:1221-1224`), so the subagents extension and
-                // the permission extension observe one object. That is what makes the pane say
-                // `blocked`, which is the reason this feature exists.
+                // What THIS crate owns is the fleet, and it feeds that to whichever bridge is
+                // armed. The attach order is load-bearing and is stated at the attach site:
+                // herdr-status attaches BEFORE subagents, and the dispatcher delivers
+                // `session_start` in registration order, so the bridge exists by this arm. Get it
+                // backwards and only the initial restore below is lost — every later resync (the
+                // turn boundary, the run-ended bus events) re-derives both levels.
                 //
-                // NOT `ctx.human_wait_gate()`. `HostCtx::event` mints a FRESH
-                // `Arc<HumanWaitGate>` per native registration (`cyrup-ext/src/native.rs:170-180`,
-                // one ctx per native at `cyrup-ext/src/facade.rs:541`), so this extension's gate
-                // is not the one the permission dialog raises (`prompt.rs:184` holds a guard on
-                // the permission extension's own ctx). Watching it left the pane at `working` for
-                // the entire life of every approval dialog.
-                //
-                // `None` — no backend bound — arms everything but the dialog watcher; see
-                // `crate::herdr::runtime::arm`.
-                let human_lock = self
-                    .executor
-                    .host_services()
-                    .and_then(|services| services.human_interaction_lock());
-                if let Some(bridge) = crate::herdr::arm(ctx.has_ui, human_lock) {
-                    // pi `sessionStarted({ hasUI, runs: restoredRuns })`
-                    // (`herdr-status.ts:376-380`): the restore. A detached runner started by a
-                    // PREVIOUS cyrup process is still going and will never deliver a "started"
-                    // edge to this one, so the level has to be read off the fleet projection or
-                    // the pane starts a session claiming to be idle while work is in flight.
+                // pi's `sessionStarted({ hasUI, runs: restoredRuns })` (`herdr-status.ts:376-380`):
+                // the restore. A detached runner started by a PREVIOUS cyrup process is still going
+                // and will never deliver a "started" edge to this one, so the level has to be read
+                // off the fleet projection or the pane starts a session claiming to be idle while
+                // work is in flight.
+                if let Some(bridge) = crate::herdr::bridge() {
                     let fleet = self.executor.fleet_state(&ctx.cwd, false, false).await;
-                    bridge.sync_fleet(&fleet, self.executor.open_herdr_project_pane_count());
+                    bridge.sync_fleet(&crate::herdr::fleet_view(
+                        &fleet,
+                        self.executor.open_herdr_project_pane_count(),
+                    ));
                 }
 
                 // PB-8 — pi `rpcBridge.emitReady(ctx)` (`extension/index.ts:1186`, the tail of its
@@ -677,19 +636,13 @@ impl NativeExtension for SubagentsExtension {
                 // payload, instead of having to poll `ping` until one answers.
                 self.emit_rpc_ready();
             }
-            // The herdr status bridge's root-turn edge, and pi's `agentStarted()`
-            // (`herdr-status.ts:372-375`) in one: the pane goes `working` while cyrup itself is
-            // thinking, and every attention raised during the previous turn is acknowledged so a
-            // notice the human has already been shown cannot re-block the pane. A run that is
-            // still asking raises again on its next notice or at the next resync.
-            //
-            // No other subsystem in this crate handles `AgentStart`, so this arm is the
-            // subscription's only consumer; outside a herdr pane it is one `Option` test.
-            HostEvent::AgentStart => {
-                if let Some(bridge) = crate::herdr::bridge() {
-                    bridge.agent_start();
-                }
-            }
+            // `AgentStart` is NOT handled here any more, and the subscription for it is gone too.
+            // The herdr status bridge's ROOT-TURN edge (pi's `agentStarted()`,
+            // `herdr-status.ts:372-375`) belongs to whichever cyrup owns the pane, and that is now
+            // `cyrup_ext_herdr`'s own built-in — which arms in sessions this crate is not even
+            // attached to. `edge_depth` is a saturating refcount: a second feeder of the same turn
+            // would leave the pane at `working` until both balanced. This crate feeds levels
+            // (`sync_fleet`), its foreground run edges, and its runs' attention rows.
             // pi's `agent_end` handler (`extension/index.ts:585-601` @v0.43.0). Its first line
             // (`drainOutstandingWork` when there is no UI) belongs to the background-drain
             // subsystem, not to missions; the goal-mission scan below is the rest of that handler.
@@ -803,44 +756,16 @@ impl NativeExtension for SubagentsExtension {
                 // registered handler, so its position here is free.
                 self.refresh_fleet_status_widget(&ctx.cwd, ctx.has_ui, ctx.mode)
                     .await;
-                // The herdr bridge is a NOTIFIER and goes last, after the watchdog's boundary
-                // review and the goal scan, for the same reason the registration order above is
-                // upstream's: those two can inject messages and can block, and a pane that said
-                // `idle` before they finished would be lying for as long as they took.
-                //
-                // Saturating on the way down. `AgentEnd` fires without a matching `AgentStart` on
-                // a session resumed mid-turn, and herdr never reclaims state from a `cyrup:`
-                // source — an unsigned wrap would pin the pane at `working` for ever.
-                if let Some(bridge) = crate::herdr::bridge() {
-                    bridge.agent_end();
-                }
+                // No herdr call here either, for the `AgentStart` reason above: the root-turn
+                // edge is the built-in's to feed, and it is fed once per turn from there.
             }
             HostEvent::SessionShutdown { .. } => {
-                // STARTED first, JOINED last — see [`HERDR_RELEASE_JOIN_BUDGET`] for the
-                // arithmetic and for what a plain `crate::herdr::shutdown().await` here cost.
-                //
-                // The release is the one piece of this teardown that is visible in ANOTHER
-                // program's UI. Everything below it is cyrup's own in-process state, which nobody
-                // outside the process can see; skipping the release leaves a `working` or
-                // `blocked` row in the human's sidebar that only a herdr RESTART clears — herdr
-                // never reclaims agent state from a `cyrup:` source (no TTL,
-                // `tmp/herdr/src/terminal/state.rs:18-25`; a process-exit override that only fires
-                // for an agent herdr can name, `:401-407`). `crate::herdr`'s module doc carries
-                // the three citations. That is why it goes out FIRST and why it is still awaited.
-                //
-                // It is also the ONLY statement in this arm that waits on something outside the
-                // process, so it is the only one that can hang. `tokio::spawn` is what keeps the
-                // two facts — "first on the wire" and "cannot starve the rest" — from being in
-                // tension: the task takes the global `BRIDGE` slot and starts draining on its own,
-                // while the in-process disposals below run to completion regardless.
-                //
-                // This is also the `kill` path, not only the `/quit` path: cyrup's own signal
-                // handler (`crates/cyrup/src/signals.rs:317-330`) takes SIGTERM/SIGHUP, and on an
-                // interactive host it fires the cancel token rather than exiting, so `main`'s
-                // `runtime.dispose()` fans `session_shutdown{quit}` out to here. The bridge
-                // therefore installs NO signal handler of its own — a second one would exit the
-                // process out from under this very teardown.
-                let herdr_release = tokio::spawn(crate::herdr::shutdown());
+                // No herdr release here any more. `crate::herdr::shutdown()` — the call that keeps
+                // a phantom `working` row out of the human's sidebar, and which herdr will NOT
+                // reclaim on its own from a `cyrup:` source — is now `cyrup_ext_herdr`'s own
+                // `SessionShutdown` arm, and it carries the spawn-then-join budget machinery with
+                // it (`cyrup-ext-herdr/src/extension.rs`'s `HERDR_RELEASE_JOIN_BUDGET`). Arming and
+                // releasing are one owner's job; a companion only feeds levels.
                 // pi `runtimeCleanup`/`session_shutdown` both call `supervisorChannel.dispose()`
                 // (`extension/index.ts:412-430`): stop the poller and drop the pending map, so a
                 // rebuilt session never re-surfaces the previous session's requests.
@@ -893,20 +818,6 @@ impl NativeExtension for SubagentsExtension {
                     );
                     self.async_slot_occupied
                         .store(false, std::sync::atomic::Ordering::Release);
-                }
-                // The join. Everything above has run; this is the only thing left to wait for, and
-                // it is bounded so that a herdr which stopped answering ends this handler
-                // normally instead of having it dropped at the dispatcher's deadline.
-                match tokio::time::timeout(HERDR_RELEASE_JOIN_BUDGET, herdr_release).await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(err)) => {
-                        tracing::debug!(%err, "herdr: the release task ended abnormally");
-                    }
-                    Err(_elapsed) => tracing::warn!(
-                        ?HERDR_RELEASE_JOIN_BUDGET,
-                        "herdr: the pane release did not finish inside the join budget; the rest \
-                         of the subagents teardown ran"
-                    ),
                 }
             }
             // pi `register-main.ts:415-418`.
@@ -991,7 +902,10 @@ impl NativeExtension for SubagentsExtension {
                 // have changed.
                 if let Some(bridge) = crate::herdr::bridge() {
                     let fleet = self.executor.fleet_state(&ctx.cwd, false, false).await;
-                    bridge.sync_fleet(&fleet, self.executor.open_herdr_project_pane_count());
+                    bridge.sync_fleet(&crate::herdr::fleet_view(
+                        &fleet,
+                        self.executor.open_herdr_project_pane_count(),
+                    ));
                 }
             }
             // pi `register-main.ts:423-426` — the mid-run cadence trigger.
@@ -1149,9 +1063,12 @@ impl NativeExtension for SubagentsExtension {
                     .and_then(serde_json::Value::as_str)
                     .filter(|id| !id.is_empty())
             {
-                bridge.clear_attention(&crate::background::RunId::from_token(run_id.to_string()));
+                bridge.clear_attention(&crate::herdr::RunToken::new(run_id));
                 let fleet = self.executor.fleet_state(&self.cwd, false, false).await;
-                bridge.sync_fleet(&fleet, self.executor.open_herdr_project_pane_count());
+                bridge.sync_fleet(&crate::herdr::fleet_view(
+                    &fleet,
+                    self.executor.open_herdr_project_pane_count(),
+                ));
             }
             return Ok(());
         }

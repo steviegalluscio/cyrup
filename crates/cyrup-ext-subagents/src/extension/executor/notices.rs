@@ -463,7 +463,9 @@ impl SubagentExecutor {
             // after the human was already being waited on, which is precisely the latency this
             // feature exists to remove.
             if let Some(bridge) = crate::herdr::bridge() {
-                let run = crate::background::RunId::from_token(event.run_id.as_str());
+                // The bridge keys attention on an opaque token, not on this crate's `RunId` — it
+                // is attached in sessions where this crate never loaded.
+                let run = crate::herdr::RunToken::new(event.run_id.as_str());
                 match event.event_type {
                     crate::registration::ControlEventType::NeedsAttention => bridge
                         .raise_attention(

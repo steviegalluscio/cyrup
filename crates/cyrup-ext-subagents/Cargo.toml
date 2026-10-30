@@ -58,6 +58,12 @@ cyrup-ext = { workspace = true, features = ["wasm-host"] }
 # message); the extension seam wants the agent-loop one.
 cyrup-agent = { workspace = true }
 cyrup-session = { workspace = true }
+# The herdr status bridge itself: gate, state machine, reporter, consumer, and the built-in that
+# arms it. It lives OUTSIDE this crate on purpose — this extension is opt-in and default OFF
+# (`extension/host/registration.rs`'s `gate_on_install`), and tying the pane's sidebar state to it
+# meant a default cyrup in a herdr pane reported nothing at all. This crate feeds it a
+# `cyrup_ext_herdr::fleet::FleetView` (see `src/herdr/mod.rs`'s `fleet_view`) and nothing else.
+cyrup-ext-herdr = { workspace = true }
 # The workspace's ONE herdr client (pinned to the herdr `v0.9.1` tag, `065ef9d6`). `src/herdr/` is the
 # cyrup half of the status bridge — the state machine and the label rules — and it reports through
 # this crate's typed method surface rather than growing a second NDJSON client beside it. A leaf

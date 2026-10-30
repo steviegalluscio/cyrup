@@ -4,6 +4,37 @@ All notable changes to cyrup are recorded here. Each released version gets a `##
 the newest is first. `/changelog` renders this file inside the agent, and a new entry raises the
 "What's New" notice on the next start.
 
+## Unreleased
+
+### The herdr pane status feed now runs by default (HERDR-010)
+
+`cyrup` inside [herdr](https://github.com/herdr) now reports its pane to herdr's Agents sidebar in
+every session that runs inside a herdr pane — `idle`, `working` while a turn runs, and `blocked`
+while a permission, MCP, intercom or flux dialog is waiting on you — and releases the row on exit.
+
+It previously did none of that unless you had opted into subagent delegation. The whole feed lived
+inside the subagents extension's crate, and that extension is opt-in and default OFF
+(`CYRUP_SUBAGENTS`, or a `subagents/config.json`). In a default session the extension never
+attached, the arm was never reached, and a cyrup sitting in a pane with a live herdr server
+reported nothing at all. No log line said so: the code that would have logged it lived in the
+extension that was not loaded.
+
+- **New crate `cyrup-ext-herdr`** — the state machine, the reporter task, the event consumer, the
+  opt-in sidebar re-ordering, and a built-in (`herdr-status`) attached next to `mcp` and
+  `permission-system`. Its only gate is "inside a herdr pane, with a UI".
+- Three switches, like every other built-in: `"extensions": ["-builtin:herdr-status"]` in settings,
+  `CYRUP_HERDR_STATUS=0` in the environment, and `--no-extensions`, which drops it the way it drops
+  the other ambient built-ins (`-e builtin:herdr-status` loads it back). The sidebar *re-ordering*
+  stays opt-in at `CYRUP_HERDR_AGENT_VIEW=1`, because that touches panes cyrup does not own.
+- The pane's release now survives a hung herdr. The `SessionShutdown` handler *spawns* the release
+  and bounds only the join: a 5 s release inside a 5 s dispatcher budget used to consume the whole
+  budget on its first statement, so the handler future was dropped and every shutdown handler
+  registered after it never ran — silently.
+- Subagents now **feeds** the bridge a fleet snapshot instead of the bridge reaching into the fleet,
+  and stops driving the root-turn edge, which the built-in owns. The privacy rule — raw prompts and
+  child output never reach pane metadata — moved with the renderer and is still pinned.
+- The reports' authority is renamed `cyrup:subagents` → `cyrup:status`.
+
 ## 0.1.0 - 2026-10-11
 
 The first versioned pre-release. Development began 2026-08-27; this entry covers 521 commits

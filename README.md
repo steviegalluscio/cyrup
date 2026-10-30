@@ -138,10 +138,20 @@ the command palette.
 
 Run cyrup inside [herdr](https://github.com/herdr) and the herdr sidebar shows which pane is
 blocked waiting on you: permission and MCP dialogs raise the signal, and it is released on exit so
-no phantom `working` row is left behind. An agent can open, drive, inspect and close inspector and
-project panes through seven tool verbs, and subagents can run on a herdr saved machine, with events
-and exit relayed back to the supervisor. Without herdr installed, every herdr surface reports that
-it is unavailable and does nothing else.
+no phantom `working` row is left behind. That feed is a built-in of its own (`herdr-status`), armed
+by one condition and one only — cyrup is running inside a herdr pane and has a UI. It does **not**
+require the subagents extension, and never should have: until this was split out, the feed lived
+inside that extension's crate, so a default session (subagents is opt-in, default OFF) reported
+nothing at all, silently, in a pane with a live herdr server. It turns off three ways, like every
+other built-in: `"extensions": ["-builtin:herdr-status"]` in settings, `CYRUP_HERDR_STATUS=0` in the
+environment, or `--no-extensions`, which drops it with the other companions
+(`-e builtin:herdr-status` loads it back). The sidebar *re-ordering*
+(`agent.view.set`, which touches panes cyrup has nothing to do with) stays opt-in at
+`CYRUP_HERDR_AGENT_VIEW=1`.
+
+An agent can open, drive, inspect and close inspector and project panes through seven tool verbs,
+and subagents can run on a herdr saved machine, with events and exit relayed back to the supervisor.
+Without herdr installed, every herdr surface reports that it is unavailable and does nothing else.
 
 ## Extensions are WebAssembly components
 
@@ -268,7 +278,8 @@ it, not by coverage. Dependencies point downward only. `cyrup-core` depends on n
 | `cyrup-permission-system` | 23,903 | 85.8% | runtime allow / ask / deny policy over every tool call |
 | `cyrup-intercom` | 46,883 | 79.3% | Unix-socket broker for supervisor-to-subagent coordination |
 | `cyrup-flux` | 5,275 | 98.0% | the Flux structured development pipeline |
-| `cyrup-herdr` | 13,797 | 86.7% | the one client for herdr's NDJSON socket API: typed methods, event subscription, reconnect, the pane status bridge |
+| `cyrup-herdr` | 13,797 | 86.7% | the one client for herdr's NDJSON socket API: typed methods, event subscription, reconnect |
+| `cyrup-ext-herdr` | 3,266 | — | the pane status bridge: the state machine, the reporter task, and the `herdr-status` built-in that arms it in any herdr pane |
 | `cyrup-mcp` | 93,340 | 84.8% | MCP client: servers, tools, OAuth, sampling, elicitation, wire tracer, the `/mcp` surface |
 | `cyrup-acp` | 21,539 | 94.1% | Agent Client Protocol adapter: an editor (Zed is the reference client) drives cyrup over ACP JSON-RPC on stdio |
 | `cyrup-llama` | 21,654 | 96.5% | llama.cpp router support: provider, model discovery, Hugging Face search and the `/llama` manager, as a native extension |

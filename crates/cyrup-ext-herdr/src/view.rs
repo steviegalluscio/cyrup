@@ -142,7 +142,7 @@ mod tests {
         assert_eq!(
             json,
             serde_json::json!({
-                "source": "cyrup:subagents",
+                "source": "cyrup:status",
                 "label": "cyrup fleet",
                 "sort": [
                     {"field": "attention", "order": "desc"},
@@ -179,6 +179,6 @@ mod tests {
     #[test]
     fn the_clear_names_this_source() {
         let json = serde_json::to_value(clear_params()).expect("serializes");
-        assert_eq!(json, serde_json::json!({ "source": "cyrup:subagents" }));
+        assert_eq!(json, serde_json::json!({ "source": "cyrup:status" }));
     }
 }

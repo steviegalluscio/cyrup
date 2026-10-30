@@ -101,6 +101,8 @@ literal string `1`.
 | `CYRUP_PERMISSION_SYSTEM` | `1`, `true`, `on`, `yes` | Install [the permission system](../extensions/permissions.md) even with no policy file |
 | `CYRUP_INTERCOM` | `1`, `true`, `on`, `yes` | Install [intercom](../extensions/intercom.md) |
 | `CYRUP_EXPERIMENTAL` | exactly `1` | Enable experimental features, including the first-run setup wizard |
+| `CYRUP_HERDR_STATUS` | `0`, `false`, `off`, `no` to opt out | Default ON: report this pane's state to the herdr Agents sidebar whenever cyrup runs inside a herdr pane |
+| `CYRUP_HERDR_AGENT_VIEW` | exactly `1` | Also re-order herdr's own sidebar by attention (`agent.view.set`) — opt-in because it changes panes cyrup does not own |
 
 **A config file arms these too.** Subagents also switch on when `<agent dir>/subagents/config.json`
 or `.cyrup/subagents/config.json` exists. Intercom switches on when
