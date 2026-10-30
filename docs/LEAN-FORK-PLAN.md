@@ -115,7 +115,10 @@ nothing. So step 2's payload — `cyrup-workflow-runtime`, `workflows/scripted/`
 step, and the `deno_core` / `deno_ast` / `deno_error` and `fancy-regex` dependency entries — went with
 step 4. **V8 is now out of the graph entirely**, which is what step 2 existed to buy.
 
-**Step 3 — DONE on `lean/3-tool-search-core`.** `crates/cyrup-codemode` is now
+**Step 3 — DONE, on `lean/4-subagents` rather than its own branch.** The plan called for one branch
+per step; the rename was taken on top of step 4 instead, because nothing about step 3 depends on
+whether step 4 has happened — the two consumers are the same at either point — and a branch of its own
+would have needed a merge to prove that. `crates/cyrup-codemode` is now
 `crates/cyrup-tool-search-core`: `git mv` of the directory, the crate name, the workspace member +
 dependency entry, and the two consumers (`cyrup-tool-search`, `cyrup-mcp`). The commit carries no
 deletions, so `git log --follow -- crates/cyrup-tool-search-core/src/rank.rs` still walks back to the
@@ -192,7 +195,9 @@ record it is rather than rewritten.
 
 ## Order
 
-Planned `1 → 2 → 3 → 4`; taken **`1 → 4 → 3`**, with step 2 absorbed into 4 (see above).
+Planned `1 → 2 → 3 → 4`; taken **`1 → 4 → 3`** on two branches (`lean/1-codemode`, then
+`lean/4-subagents` carrying 4 and 3), with step 2 absorbed into 4 (see above). All four steps are
+closed.
 
 Each step is its own branch off the previous, so any can be abandoned without losing the earlier ones.
 Re-measure build size and time after step 2 — that is where codemode and V8 are gone, and it is the
