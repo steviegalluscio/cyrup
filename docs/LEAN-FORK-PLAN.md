@@ -212,3 +212,50 @@ exposes `report-agent` / `report-agent-session` / `report-metadata` / `release-a
 env-only (`HERDR_ENV`, `HERDR_SOCKET_PATH`, `HERDR_PANE_ID`). `<agentDir>/extensions/` is a pre-trust
 root, which is what `exec`/`proc` require. Guests get HTTP only, no raw sockets, so it must drive the
 herdr CLI.
+
+---
+
+## Measured — all four steps, `main` vs `light-cyrup`
+
+`main` @ `c5c0d1e6` against `light-cyrup` @ `f7a396bb`. Everything under `crates/`, `.rs` only.
+
+| measure | before | after | delta |
+|---|---|---|---|
+| crates (directories in `crates/`) | 33 | 30 | −3 |
+| `.rs` files | 2,730 | 2,085 | −645 |
+| Rust lines, everything | 1,480,626 | 952,122 | −528,504 (−35.7%) |
+| Rust non-blank lines, everything | 1,382,229 | 886,129 | −496,100 (−35.9%) |
+| non-blank, **tests excluded (files)** | 977,434 | 564,639 | −412,795 (−42.2%) |
+| non-blank, **tests excluded (files + inline)** | 686,972 | 429,156 | −257,816 (−37.5%) |
+
+The three crates that left: `cyrup-codemode-runtime` (step 1), `cyrup-ext-subagents` and
+`cyrup-workflow-runtime` (step 4). One was renamed in place: `cyrup-codemode` →
+`cyrup-tool-search-core` (step 3).
+
+**What "tests excluded" means**, since the number changes by 30% depending on the definition:
+
+- *files* — any `.rs` under a directory named `tests` (so both `crates/*/tests/**` integration
+  targets and `crates/*/src/tests/**`), or named `tests.rs`, `*_tests.rs`, `*_test.rs`, or under
+  `benches/` / `examples/`.
+- *inline* — additionally, lines inside items carrying `#[cfg(test)]` or `#[cfg(all(test, …))]` are
+  removed by brace matching. This is where most of this workspace's test code actually lives, so
+  "files" alone overstates the shipped code by 42% (977,434 vs 686,972 at `main`).
+
+Both counts exclude blank lines. Diff-stat for the same range, for cross-checking: +2,614 /
+−536,880 over all files, +1,952 / −529,166 over `.rs`.
+
+### Release binary
+
+`cargo build --release --bin cyrup`, profile as committed: `lto = "fat"`, `codegen-units = 1`,
+`opt-level = "z"`, `panic = "abort"`, `strip = "symbols"`. rustc 1.99.1.
+
+| binary | bytes | MiB |
+|---|---|---|
+| before (built from the pre-plan tree, 2026-10-28) | 105,397,376 | 100.5 |
+| after (`light-cyrup`) | 46,881,552 | 44.7 |
+| delta | −58,515,824 | **−55.8 MiB (−55.5%)** |
+
+Read the delta as V8 leaving, not as 528k lines leaving. `deno_core` was linked for exactly two
+consumers — the codemode sandbox and `workflowScript` — and both are deleted, so a static binary that
+previously carried `libv8` now carries none. Incremental release relink took 3m12s; the first cold
+release build of the shrunken graph will be shorter than before for the same reason.
