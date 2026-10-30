@@ -385,7 +385,7 @@ impl ScriptBudget {
     /// The budget of `code`, or `None` when the source does not parse — the `codemode` tool
     /// refuses it at once, so there is nothing to wait for.
     fn of(code: &str) -> Option<Self> {
-        let parsed = cyrup_codemode::source::parse_codemode_source(code).ok()?;
+        let parsed = cyrup_tool_search_core::source::parse_codemode_source(code).ok()?;
         Some(parsed.options.timeout_ms.map_or(Self::Default, |ms| {
             Self::Limit(std::time::Duration::from_millis(ms))
         }))
@@ -423,7 +423,7 @@ fn charge_script(
     if left_ms == 0 {
         return Err(limit);
     }
-    Ok(cyrup_codemode::source::with_timeout_ms(code, left_ms))
+    Ok(cyrup_tool_search_core::source::with_timeout_ms(code, left_ms))
 }
 
 /// What a `codemode` or `tool_search` call is told about the servers it needed and did not get.
@@ -484,7 +484,7 @@ fn script_needs_server(code: &str, server: &str, prefix: crate::config::ToolPref
     if prefix.is_empty() {
         return true;
     }
-    let identifier = cyrup_codemode::identifier::to_codemode_identifier(&prefix);
+    let identifier = cyrup_tool_search_core::identifier::to_codemode_identifier(&prefix);
     code.contains(&prefix) || code.contains(identifier.as_str())
 }
 
@@ -5605,7 +5605,7 @@ done
             panic!("the script was not charged for its {waited:?} wait: {outcome:?}");
         };
         let charged =
-            cyrup_codemode::source::parse_codemode_source(input["code"].as_str().unwrap()).unwrap();
+            cyrup_tool_search_core::source::parse_codemode_source(input["code"].as_str().unwrap()).unwrap();
         let left = charged.options.timeout_ms.unwrap();
         let spent = 6000 - left;
         // What is left is rounded down to whole milliseconds, so what is charged is the wait
@@ -5618,7 +5618,7 @@ done
         );
         assert_eq!(
             charged.code,
-            cyrup_codemode::source::parse_codemode_source(code)
+            cyrup_tool_search_core::source::parse_codemode_source(code)
                 .unwrap()
                 .code,
             "only the timeout changes"

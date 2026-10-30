@@ -7,8 +7,8 @@
 use std::num::NonZeroUsize;
 use std::sync::LazyLock;
 
-use cyrup_codemode::js::js_trim;
-use cyrup_codemode::rank::DEFAULT_TOOL_SEARCH_LIMIT;
+use cyrup_tool_search_core::js::js_trim;
+use cyrup_tool_search_core::rank::DEFAULT_TOOL_SEARCH_LIMIT;
 use serde_json::{Value, json};
 
 /// `toolSearchSchema` (`tool.ts:159-164`): `query` (required) and `limit?`, whose description

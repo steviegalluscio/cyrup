@@ -1,6 +1,6 @@
 [package]
-name = "cyrup-codemode"
-description = "pi codemode, engine-independent half: script source format, TypeScript declaration renderer, BM25 tool ranker, output budget (gap-analysis 18)"
+name = "cyrup-tool-search-core"
+description = "pi codemode's engine-independent half, kept after the codemode tool was deleted: script source format, identifier sanitiser, BM25 tool ranker, JavaScript string/number/key semantics (gap-analysis 18)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,8 +9,10 @@ repository.workspace = true
 authors.workspace = true
 
 # DELIBERATELY ABSENT: `deno_core` and every other JavaScript engine. Everything here is a total
-# function over explicit inputs (the one filesystem write sits behind `output::spill_output`), so the
-# sandbox crate can depend on this one without this one ever depending on an engine.
+# function over explicit inputs, which is what let the (now deleted) sandbox depend on this crate
+# without this crate ever depending on an engine -- and what lets it survive that deletion. The
+# workspace has no JavaScript engine at all now: both consumers, the codemode sandbox and
+# `workflowScript`, are gone (docs/LEAN-FORK-PLAN.md steps 1 and 4).
 [lints]
 workspace = true
 

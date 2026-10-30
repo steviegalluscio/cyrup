@@ -42,7 +42,8 @@ and four that each gained more than 40,000 lines:
   extension: the provider, model discovery, Hugging Face search and the `/llama` manager.
   `cyrup-llama-cpp-wire` is a test-only crate holding the `llama-server` wire as one cited
   definition the workspace's fake servers answer from.
-- **Tool search over a JavaScript-shaped core.** `cyrup-codemode` (+5,005) is the engine-independent
+- **Tool search over a JavaScript-shaped core.** `cyrup-tool-search-core` (+5,005, named
+  `cyrup-codemode` until the tool it was named for was deleted) is the engine-independent
   half of pi's codemode: the BM25 tool ranker and the ECMAScript string, number and key-comparison
   semantics `cyrup-mcp` and `cyrup-tool-search` share. `cyrup-tool-search` adds pi's `tool_search`
   over deferred tools. pi's `codemode` tool itself — the `deno_core`/V8 sandbox and its script
@@ -249,7 +250,7 @@ it, not by coverage. Dependencies point downward only. `cyrup-core` depends on n
 | `cyrup-mcp` | 93,340 | 84.8% | MCP client: servers, tools, OAuth, sampling, elicitation, wire tracer, the `/mcp` surface |
 | `cyrup-acp` | 21,539 | 94.1% | Agent Client Protocol adapter: an editor (Zed is the reference client) drives cyrup over ACP JSON-RPC on stdio |
 | `cyrup-llama` | 21,654 | 96.5% | llama.cpp router support: provider, model discovery, Hugging Face search and the `/llama` manager, as a native extension |
-| `cyrup-codemode` | 5,005 | 98.8% | the engine-independent half pi's codemode shares with tool search: BM25 tool ranker, ECMAScript string/number/key semantics (pi's `codemode` tool is deleted here — see `docs/LEAN-FORK-PLAN.md`) |
+| `cyrup-tool-search-core` | 5,005 | 98.8% | what pi's codemode shares with tool search, kept after the tool was deleted: BM25 tool ranker, ECMAScript string/number/key semantics (`docs/LEAN-FORK-PLAN.md`) |
 | `cyrup-tool-search` | 940 | 98.5% | pi's `tool_search`: finds deferred tools by BM25 and loads the matches |
 | `cyrup-pico` | 12,710 | 76.1% | Pico5 durability kernel, imperative shell: the mutation line, the transaction, drafts, the durability witnesses |
 | `cyrup-pico-doc` | 4,932 | 76.6% | Pico5's functional core: `DocValue`, the operation applier, the replay planner — total functions over explicit inputs |

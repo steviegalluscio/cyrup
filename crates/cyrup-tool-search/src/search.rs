@@ -4,8 +4,8 @@
 //! Everything here is a function over explicit inputs. The session is touched in one place,
 //! [`search_and_load`].
 
-use cyrup_codemode::js::{js_trim, split_lines};
-use cyrup_codemode::rank::{Bm25Ranker, ToolRanker, create_tool_search_document};
+use cyrup_tool_search_core::js::{js_trim, split_lines};
+use cyrup_tool_search_core::rank::{Bm25Ranker, ToolRanker, create_tool_search_document};
 use cyrup_core::{ToolExposure, ToolNamespace};
 use cyrup_ext::HostServices;
 use serde_json::Value;

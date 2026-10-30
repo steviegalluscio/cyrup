@@ -17,7 +17,7 @@ cyrup-core = { workspace = true }
 # the session seam it searches and loads through.
 cyrup-ext = { workspace = true }
 # The BM25 ranker, the search document and the JavaScript string semantics the result text needs.
-cyrup-codemode = { workspace = true }
+cyrup-tool-search-core = { workspace = true }
 async-trait = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

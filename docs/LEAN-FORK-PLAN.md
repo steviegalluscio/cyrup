@@ -13,7 +13,7 @@ is deleted, not gated.**
 | # | Decision | Status |
 |---|---|---|
 | D1 | V8 (`deno_core`) goes when **both** JS consumers are gone: the codemode sandbox *and* workflowScript. Removing only codemode does not remove V8. | settled |
-| D2 | `cyrup-codemode` is **not** codemode-only. It hosts BM25 tool search + ECMAScript string/number/key semantics used by `cyrup-mcp` and `cyrup-tool-search`. Rename to **`cyrup-tool-search-core`**, do not delete. | settled |
+| D2 | `cyrup-codemode` is **not** codemode-only (renamed at step 3). It hosts BM25 tool search + ECMAScript string/number/key semantics used by `cyrup-mcp` and `cyrup-tool-search`. Rename to **`cyrup-tool-search-core`**, do not delete. | settled |
 | D3 | The 7 herdr pane tool verbs (`inspector.*`, `project.*`) are unwanted. They are actions of the single `subagent` tool, and default-off (`CYRUP_SUBAGENTS`), so they are invisible in practice. | settled |
 | D4 | herdr's **Agents sidebar status feed** is a cyrup feature that lives inside `cyrup-ext-subagents/src/herdr/`. Deleting that crate removes the sidebar. | settled |
 | D5 | Delete `cyrup-ext-subagents` in place. Rebuilding the sidebar as a WASM guest extension is a **separate, optional follow-up**, not a precondition. | settled |
@@ -115,10 +115,15 @@ nothing. So step 2's payload — `cyrup-workflow-runtime`, `workflows/scripted/`
 step, and the `deno_core` / `deno_ast` / `deno_error` and `fancy-regex` dependency entries — went with
 step 4. **V8 is now out of the graph entirely**, which is what step 2 existed to buy.
 
-**Step 3 — not done.** `cyrup-codemode` still carries its old name. It survives step 1 for the reason
-D2 gives (BM25 ranking + the ECMAScript string/number/key semantics shared by `cyrup-mcp` and
-`cyrup-tool-search`). The rename is still a standalone commit, kept free of deletions so
-`git log --follow` survives.
+**Step 3 — DONE on `lean/3-tool-search-core`.** `crates/cyrup-codemode` is now
+`crates/cyrup-tool-search-core`: `git mv` of the directory, the crate name, the workspace member +
+dependency entry, and the two consumers (`cyrup-tool-search`, `cyrup-mcp`). The commit carries no
+deletions, so `git log --follow -- crates/cyrup-tool-search-core/src/rank.rs` still walks back to the
+original `packages/codemode` port. What survives is what D2 said survives, and only that: `js`, `rank`,
+`identifier`, `source`, each with a live caller (`cyrup-mcp` is the sole user of `source` and
+`identifier`; `cyrup-tool-search` of `rank` and `js`). `getrandom`, `base64` and `tempfile` remain in
+its manifest with no use — the `output` module that needed them went with step 1 — and are dropped in
+a follow-up commit so this one stays a pure move.
 
 **Step 4 — DONE on `lean/4-subagents`.** `cyrup-ext-subagents` (451,714 lines) and
 `cyrup-workflow-runtime` are deleted, along with `deno_core`/`deno_ast`/`deno_error`/`fancy-regex`.
@@ -177,7 +182,7 @@ record it is rather than rewritten.
 
 ## Order
 
-Planned `1 → 2 → 3 → 4`; taken **`1 → 4`** with step 2 absorbed (see above), step 3 still open.
+Planned `1 → 2 → 3 → 4`; taken **`1 → 4 → 3`**, with step 2 absorbed into 4 (see above).
 
 Each step is its own branch off the previous, so any can be abandoned without losing the earlier ones.
 Re-measure build size and time after step 2 — that is where codemode and V8 are gone, and it is the

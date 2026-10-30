@@ -279,7 +279,7 @@ fn js_string(value: &Value) -> String {
         Value::Bool(flag) => flag.to_string(),
         Value::Number(number) => number
             .as_f64()
-            .map_or_else(|| number.to_string(), cyrup_codemode::js::number_to_string),
+            .map_or_else(|| number.to_string(), cyrup_tool_search_core::js::number_to_string),
         Value::String(text) => text.clone(),
         Value::Array(items) => items
             .iter()
@@ -328,7 +328,7 @@ pub fn format_schema(schema: &Value, indent: &str) -> String {
         }
         let required = required_names(schema);
         let mut lines = Vec::new();
-        for name in cyrup_codemode::js::own_keys(properties) {
+        for name in cyrup_tool_search_core::js::own_keys(properties) {
             if let Some(property) = properties.get(name) {
                 lines.extend(format_property(
                     name,
@@ -394,7 +394,7 @@ fn format_nested_schema(schema: &serde_json::Map<String, Value>, indent: &str) -
     }
     if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
         let required = required_names(schema);
-        for name in cyrup_codemode::js::own_keys(properties) {
+        for name in cyrup_tool_search_core::js::own_keys(properties) {
             if let Some(property) = properties.get(name) {
                 lines.extend(format_property(
                     name,
@@ -419,7 +419,7 @@ fn format_variants(keyword: &str, variants: &[Value], indent: &str) -> Vec<Strin
         let Some(schema) = variant.as_object() else {
             lines.push(format!(
                 "{indent}  - {}",
-                cyrup_codemode::js::json_stringify(variant)
+                cyrup_tool_search_core::js::json_stringify(variant)
             ));
             continue;
         };
@@ -443,13 +443,13 @@ fn format_variants(keyword: &str, variants: &[Value], indent: &str) -> Vec<Strin
 fn format_type(schema: &serde_json::Map<String, Value>) -> String {
     // `Object.hasOwn(schema, "const")`: `const: null` is a constant, an absent `const` is not.
     if let Some(constant) = schema.get("const") {
-        return format!("const {}", cyrup_codemode::js::json_stringify(constant));
+        return format!("const {}", cyrup_tool_search_core::js::json_stringify(constant));
     }
 
     if let Some(values) = schema.get("enum").and_then(Value::as_array) {
         let values: Vec<String> = values
             .iter()
-            .map(cyrup_codemode::js::json_stringify)
+            .map(cyrup_tool_search_core::js::json_stringify)
             .collect();
         return format!("enum: {}", values.join(", "));
     }
@@ -496,7 +496,7 @@ fn append_schema_annotations(parts: &mut Vec<String>, schema: &serde_json::Map<S
         if let Some(value) = schema.get(key) {
             parts.push(format!(
                 "[{key}: {}]",
-                cyrup_codemode::js::json_stringify(value)
+                cyrup_tool_search_core::js::json_stringify(value)
             ));
         }
     }
@@ -504,7 +504,7 @@ fn append_schema_annotations(parts: &mut Vec<String>, schema: &serde_json::Map<S
     if let Some(default) = schema.get("default") {
         parts.push(format!(
             "[default: {}]",
-            cyrup_codemode::js::json_stringify(default)
+            cyrup_tool_search_core::js::json_stringify(default)
         ));
     }
 }

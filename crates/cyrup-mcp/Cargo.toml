@@ -37,7 +37,7 @@ cyrup-core = { workspace = true }
 # annotation values with `JSON.stringify` and walks `properties` in `Object.entries` order, and
 # the workspace has exactly one reproduction of each (MCP-211). Engine-free: it depends on
 # `cyrup-core` and `serde_json` only.
-cyrup-codemode = { workspace = true }
+cyrup-tool-search-core = { workspace = true }
 # `ConfigDirs::agent_dir` is `<agent_dir>` — the one directory `mcp.json`, `mcp-cache.json`,
 # `mcp-onboarding.json`, `agent-plugin-data/` and `mcp-oauth/` all hang off (13a §26, MCP-048).
 # Also the keybindings read `ui/keys.rs` needs so a user's `mcp.panel.save` is honoured (MCP-363).

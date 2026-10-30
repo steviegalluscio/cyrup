@@ -12,7 +12,7 @@
 //! | [`tool`] | `extensions/tool-search/tool.ts:169-247` (the tool definition) |
 //! | [`extension`] | `extensions/tool-search/index.ts` |
 //!
-//! The ranker, the search document and the tokenizer are `cyrup_codemode::rank`
+//! The ranker, the search document and the tokenizer are `cyrup_tool_search_core::rank`
 //! (`extensions/tool-search/tool.ts:25-157`); `codemode`'s `searchTools()` shares them.
 
 #![forbid(unsafe_code)]
