@@ -20,6 +20,7 @@ error[E0423]: cannot initialize a tuple struct which contains private fields
 23 |     let literal = DocRoot(Arc::new(DocMap::new()));
    |                   ^^^^^^^
    |
+   = note: a struct named `DocRoot` exists in another namespace
 note: constructor is not visible here due to private fields
   --> src/value.rs
    |

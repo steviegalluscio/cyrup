@@ -4,7 +4,7 @@ error: lifetime may not live long enough
 38 |           .commit(cx, async |mut tx| {
    |  ____________________________-------_^
    | |                            |     |
-   | |                            |     return type of async closure `{async closure body@$DIR/tests/compile-fail/a_doc_handle_cannot_cross_transactions.rs:38:36: 41:10}` contains a lifetime `'2`
+   | |                            |     return type of async closure is Result<(DocHandle<'2, Empty>, cyrup_pico::Tx<'_, Writing>), CallbackError>
    | |                            has type `cyrup_pico::Tx<'1, Reading>`
 39 | |             let handle = tx.doc(&address, ()).await?;
 40 | |             Ok((handle, tx.writing()))

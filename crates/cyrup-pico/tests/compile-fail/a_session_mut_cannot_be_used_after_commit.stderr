@@ -11,7 +11,7 @@ error[E0382]: use of moved value: `session`
 25 |       let second = session.commit(cx, async |_tx| {
    |                    ^^^^^^^ value used here after move
    |
-note: `SessionMut::commit` takes ownership of the receiver `self`, which moves `session`
+note: `cyrup_pico::SessionMut::commit` takes ownership of the receiver `self`, which moves `session`
   --> src/session.rs
    |
    |     pub async fn commit<R, F>(mut self, cx: &Cx, change: F) -> CommitOutcome<R>
@@ -32,7 +32,7 @@ error[E0382]: use of moved value: `session`
 40 |       let _ = session
    |               ^^^^^^^ value used here after move
    |
-note: `SessionMut::commit` takes ownership of the receiver `self`, which moves `session`
+note: `cyrup_pico::SessionMut::commit` takes ownership of the receiver `self`, which moves `session`
   --> src/session.rs
    |
    |     pub async fn commit<R, F>(mut self, cx: &Cx, change: F) -> CommitOutcome<R>
