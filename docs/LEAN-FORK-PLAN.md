@@ -115,7 +115,7 @@ nothing. So step 2's payload — `cyrup-workflow-runtime`, `workflows/scripted/`
 step, and the `deno_core` / `deno_ast` / `deno_error` and `fancy-regex` dependency entries — went with
 step 4. **V8 is now out of the graph entirely**, which is what step 2 existed to buy.
 
-**Step 3 — DONE, on `lean/4-subagents` rather than its own branch.** The plan called for one branch
+**Step 3 — DONE, on `light-cyrup` rather than its own branch.** The plan called for one branch
 per step; the rename was taken on top of step 4 instead, because nothing about step 3 depends on
 whether step 4 has happened — the two consumers are the same at either point — and a branch of its own
 would have needed a merge to prove that. `crates/cyrup-codemode` is now
@@ -128,7 +128,7 @@ original `packages/codemode` port. What survives is what D2 said survives, and o
 its manifest with no use — the `output` module that needed them went with step 1 — and are dropped in
 a follow-up commit so this one stays a pure move.
 
-**Step 4 — DONE on `lean/4-subagents`.** `cyrup-ext-subagents` (451,714 lines) and
+**Step 4 — DONE, on the branch now named `light-cyrup` (was `lean/4-subagents`).** `cyrup-ext-subagents` (451,714 lines) and
 `cyrup-workflow-runtime` are deleted, along with `deno_core`/`deno_ast`/`deno_error`/`fancy-regex`.
 Beyond the plan's list:
 
@@ -196,8 +196,8 @@ record it is rather than rewritten.
 ## Order
 
 Planned `1 → 2 → 3 → 4`; taken **`1 → 4 → 3`** on two branches (`lean/1-codemode`, then
-`lean/4-subagents` carrying 4 and 3), with step 2 absorbed into 4 (see above). All four steps are
-closed.
+`light-cyrup` carrying 4 and 3 — that branch also carries step 1, since it descends from
+`lean/1-codemode`), with step 2 absorbed into 4 (see above). All four steps are closed.
 
 Each step is its own branch off the previous, so any can be abandoned without losing the earlier ones.
 Re-measure build size and time after step 2 — that is where codemode and V8 are gone, and it is the
