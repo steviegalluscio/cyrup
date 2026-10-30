@@ -27,12 +27,8 @@ serde = { workspace = true }
 # parse to the double `JSON.parse` yields, or `Number.prototype.toString` prints other digits).
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-# 8 random bytes for the spill file name (`randomBytes(8)`, pi `execute.ts:263`). Same pin as
-# `cyrup-permission-system`; `std` makes its error a `std::error::Error`.
-getrandom = { version = "0.3", features = ["std"] }
-# Decodes an `image()` block's data to the bytes the saved file holds and the size its label names
-# (pi `Buffer.from(data, "base64")`, `execute.ts` `saveImages` @v1.0.3).
-base64 = { workspace = true }
 
-[dev-dependencies]
-tempfile = { workspace = true }
+# [CYRUP-DELTA] `getrandom` (8 random bytes for the codemode output-spill file name), `base64`
+# (decoding an `image()` block) and `tempfile` are gone: they were the `output` module's
+# dependencies, and that module left with the codemode tool (docs/LEAN-FORK-PLAN.md step 1). They
+# survived the step-3 rename because that commit is a move and nothing else.

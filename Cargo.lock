@@ -1852,12 +1852,9 @@ dependencies = [
 name = "cyrup-tool-search-core"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
  "cyrup-core",
- "getrandom 0.3.4",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 2.0.18",
 ]
 
