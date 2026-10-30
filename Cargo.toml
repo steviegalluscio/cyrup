@@ -18,8 +18,6 @@ members = [
     "crates/cyrup",
     "crates/cyrup-test-support",
     "crates/cyrup-ext-sdk",
-    "crates/cyrup-ext-subagents",
-    "crates/cyrup-workflow-runtime",
     "crates/cyrup-permission-system",
     "crates/cyrup-intercom",
     "crates/cyrup-herdr",
@@ -118,7 +116,6 @@ default-members = [
     "crates/cyrup-sdk",
     "crates/cyrup-session-svc",
     "crates/cyrup",
-    "crates/cyrup-ext-subagents",
     "crates/cyrup-permission-system",
     "crates/cyrup-intercom",
     "crates/cyrup-herdr",
@@ -179,18 +176,11 @@ cyrup-tui          = { path = "crates/cyrup-tui",          version = "0.1.0" }
 cyrup-modes        = { path = "crates/cyrup-modes",        version = "0.1.0" }
 cyrup-sdk          = { path = "crates/cyrup-sdk",          version = "0.1.0" }
 cyrup-session-svc  = { path = "crates/cyrup-session-svc",  version = "0.1.0" }
-cyrup-ext-subagents = { path = "crates/cyrup-ext-subagents", version = "0.1.0" }
-# WORKFLOW_1 §7: the workflowScript deno_core extension (ops + prelude.js), split out of
-# `cyrup-ext-subagents` so a build script can snapshot it — a build.rs can never import from the
-# crate whose build it is running. See `crates/cyrup-workflow-runtime/src/lib.rs`'s module doc.
-cyrup-workflow-runtime = { path = "crates/cyrup-workflow-runtime", version = "0.1.0" }
 cyrup-permission-system = { path = "crates/cyrup-permission-system", version = "0.1.0" }
 cyrup-intercom     = { path = "crates/cyrup-intercom",     version = "0.1.0" }
 # The workspace's ONE herdr client (HERDR_NATIVE_CLIENT.md §5). A leaf: it depends on no cyrup
-# crate, so it stays buildable for Windows, where `cyrup-ext-subagents` — which carries `nix` and
-# `libc` ungated — today is not. That target argument is the whole reason; the graph argument that
-# stood here ("either consumer can take it without taking the other") was false, because
-# `crates/cyrup-intercom/Cargo.toml` already depends on `cyrup-ext-subagents`.
+# crate, so it stays buildable for Windows. This fork deletes `cyrup-ext-subagents`, which carried
+# `nix` and `libc` ungated, and with it `cyrup-intercom`'s edge to it.
 cyrup-herdr        = { path = "crates/cyrup-herdr",        version = "0.1.0" }
 cyrup-flux         = { path = "crates/cyrup-flux",         version = "0.1.0" }
 cyrup-mcp          = { path = "crates/cyrup-mcp",          version = "0.1.0" }
@@ -425,30 +415,6 @@ syntect              = { version = "5.3.0", default-features = false, features =
 # which ten use lookaround and three put a negative lookahead INSIDE a bounded repetition (a
 # tempered greedy token, `scripted-workflow.ts:1185-1188`) — unsplittable, so the `regex` crate
 # cannot host them. `fancy-regex` 0.18 is pure Rust, ALREADY resolved in this lockfile via
-# `syntect`'s `default-fancy` (zero new transitive crates), and auto-delegates lookaround-free
-# patterns to the linear-time `regex` engine (`RegexImpl::Wrap`). Used ONLY by
-# `cyrup-ext-subagents`'s `workflows/scripted/{recovery,preview}.rs`.
-fancy-regex          = { version = "0.18.0" }
-
-# SCOPE_3f (workflowScript runtime) — V8 via `deno_core`, the engine core Deno itself ships.
-# The deciding term is bar (b) conformance: the authoring model's reference implementation is
-# V8-in-Node, so any other engine is a trap where the agent is right and the runtime is wrong.
-# Ops are natively async on tokio, which is what lets `runs.all` fan out for real.
-#
-# V8 is C++, admitted under this file's own "where a pure-Rust alternative exists" carve-out — the
-# same one already used for `aws-lc-sys`, `ring`, `tree-sitter` and `zstd-sys`. The pure-Rust
-# alternative (`boa_engine`) fails bar (b). `forbid(unsafe_code)` is per-crate and unaffected.
-#
-# `rusty_v8`'s build downloads a CHECKSUMMED prebuilt static lib by default; `V8_FROM_SOURCE=1`
-# builds from source and `RUSTY_V8_MIRROR` points the download at an internal mirror for closed CI.
-# Used ONLY by `cyrup-ext-subagents`'s `workflows/scripted/`.
-deno_core            = { version = "0.411.0" }
-# `scopes` (pulls view+utils+visit) gives `deno_ast::scopes::Scope::is_global`, which is precisely
-# the scope-aware free-identifier resolution §3.6's enumerated-globals check needs: a local
-# `const fetch = …` must not be reported as a missing global.
-deno_ast             = { version = "0.53.3", features = ["scopes", "transforms"] }
-deno_error           = { version = "0.7.1" }
-
 # Mermaid -> Unicode terminal diagrams for cyrup-tui's markdown renderer — the Rust counterpart of
 # pi's `grok-mermaid` JS package (`components/mermaid.ts:2`), chosen 2026-08-28 after a crates.io
 # survey. MIT, and only three direct deps (`ascii-dag`, `chrono`, `unicode-width` — the last two

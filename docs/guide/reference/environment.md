@@ -13,9 +13,8 @@ migration aliases are no longer read anywhere: a `PI_*` variable in the environm
 
 **Truthiness is narrow, and it is not the same everywhere.** The core flags below accept exactly
 `1`, `true` and `yes` — `true` and `yes` case-insensitively — and the value is **not** trimmed. `on`
-is not accepted, and `CYRUP_OFFLINE=" 1"` with a leading space is not truthy. The four feature
-opt-ins (`CYRUP_SUBAGENTS`, `CYRUP_PERMISSION_SYSTEM`, `CYRUP_INTERCOM`, `CYRUP_EXPERIMENTAL`) use a
-wider rule that does trim and does accept `on`. Two core variables are narrower still and want the
+is not accepted, and `CYRUP_OFFLINE=" 1"` with a leading space is not truthy. The feature
+opt-ins (`CYRUP_PERMISSION_SYSTEM`, `CYRUP_INTERCOM`, `CYRUP_EXPERIMENTAL`) use a wider rule that does trim and does accept `on`. Two core variables are narrower still and want the
 literal string `1`. Each table below says which rule applies.
 
 ## Core
@@ -60,20 +59,20 @@ defaults differ, and only two of the three overlap at all.
 | Variable | Read by | Default | Relocates |
 |---|---|---|---|
 | `CYRUP_AGENT_DIR` | the config layer | `~/.cyrup/agent` | `settings.json`, `auth.json`, `trust.json`, `models.json`, themes, prompts, sessions, packages |
-| `CYRUP_CODING_AGENT_DIR` | intercom and subagents, and the config layer as a fallback | `~/.cyrup` — no `agent` segment | the intercom broker socket and config, the subagent directories those two crates resolve, and the agent directory when `CYRUP_AGENT_DIR` is unset |
-| `CYRUP_HOME` | subagents, intercom and the permission system only | `$HOME` | the home directory those three use to derive `~/.cyrup/...` paths |
+| `CYRUP_CODING_AGENT_DIR` | intercom, and the config layer as a fallback | `~/.cyrup` — no `agent` segment | the intercom broker socket and config, the permission-system policy root those two read, and the agent directory when `CYRUP_AGENT_DIR` is unset |
+| `CYRUP_HOME` | intercom and the permission system only | `$HOME` | the home directory those two use to derive `~/.cyrup/...` paths |
 
 Three consequences worth internalising:
 
 **`CYRUP_HOME` does not move your configuration.** Setting it leaves `settings.json`, `auth.json`
 and `trust.json` exactly where they were. Only the two agent-dir variables move those. If
-`CYRUP_HOME` is set to something unusable, the three extensions that read it fall back to the
-temporary directory.
+`CYRUP_HOME` is set to something unusable, the two extensions that read it fall back to the temporary
+directory.
 
 **The config layer reads both agent-dir spellings, in that order: `CYRUP_AGENT_DIR`, then
-`CYRUP_CODING_AGENT_DIR`.** That is deliberate — intercom and subagents
-only ever read the long spelling, so setting the long one alone puts core and those two extensions
-under the same root rather than splitting them. Setting `CYRUP_AGENT_DIR` wins for core and leaves
+`CYRUP_CODING_AGENT_DIR`.** That is deliberate — intercom and the
+permission system only ever read the long spelling, so setting the long one alone puts core and those
+two extensions under the same root rather than splitting them. Setting `CYRUP_AGENT_DIR` wins for core and leaves
 the extensions on their own default. The two variables still mean different directories when unset:
 the long one defaults to `~/.cyrup` with no `agent` segment.
 
@@ -84,26 +83,24 @@ joined onto the current directory, a blank value is ignored.
 session hands intercom the agent directory the config layer already resolved, so the broker socket,
 pid file and config sit under `~/.cyrup/agent/intercom/` — matching
 [Intercom](../extensions/intercom.md), not the `~/.cyrup` in the Default column above. That column
-describes the fallback inside intercom's and subagents' own resolvers, which a session never reaches;
+describes the fallback inside intercom's own resolver, which a session never reaches;
 it applies to a broker process started with no `CYRUP_CODING_AGENT_DIR` in its environment, and the
-spawner always sets one. Setting either variable moves the intercom directory with the agent
+session that spawns it always sets one. Setting either variable moves the intercom directory with the agent
 directory, so the two stay together.
 
 ## Feature opt-ins
 
-The three native extensions and the experimental gate are off by default. These use the wider
+The two opt-in native extensions and the experimental gate are off by default. These use the wider
 truthiness rule: `1`, `true`, `on` or `yes`, trimmed — except `CYRUP_EXPERIMENTAL`, which wants the
 literal string `1`.
 
 | Variable | Values | Meaning |
 |---|---|---|
-| `CYRUP_SUBAGENTS` | `1`, `true`, `on`, `yes` | Install the [subagents](../extensions/subagents.md) extension |
 | `CYRUP_PERMISSION_SYSTEM` | `1`, `true`, `on`, `yes` | Install [the permission system](../extensions/permissions.md) even with no policy file |
 | `CYRUP_INTERCOM` | `1`, `true`, `on`, `yes` | Install [intercom](../extensions/intercom.md) |
 | `CYRUP_EXPERIMENTAL` | exactly `1` | Enable experimental features, including the first-run setup wizard |
 
-**A config file arms these too.** Subagents also switch on when `<agent dir>/subagents/config.json`
-or `.cyrup/subagents/config.json` exists. Intercom switches on when
+**A config file arms these too.** Intercom switches on when
 `<agent dir>/intercom/config.json` exists. The permission system switches on when any policy file
 exists, when the policy `agents/` directory is non-empty, or when its `config.json` differs from the
 template cyrup generates — which means unsetting the variable is not enough to turn it off once a
@@ -255,30 +252,6 @@ stores the first two instead.
 The token search ends at `~/.cache/huggingface/token`. Search works without a token at lower rate
 limits.
 
-## Subagents
-
-Read only when the [subagents](../extensions/subagents.md) extension is installed.
-
-| Variable | Values | Meaning |
-|---|---|---|
-| `CYRUP_SUBAGENT_MAX_DEPTH` | integer | Recursion ceiling; a malformed value is treated as unset |
-| `CYRUP_SUBAGENT_MAX_SPAWNS_PER_SESSION` | number | Per-session spawn cap |
-| `CYRUP_SUBAGENT_TOOL_BUDGET` | JSON | Tool budget handed to each child |
-| `CYRUP_SUBAGENT_WAIT_TOOL_ENABLED` | see below | Enable or disable the background `wait` tool |
-| `CYRUP_SUBAGENT_EXTRA_AGENT_DIRS` | path list | Extra read-only directories to discover agent files in |
-| `CYRUP_SUBAGENT_BUILTIN_AGENTS_DIR` | path | Relocate the bundled personas |
-| `CYRUP_SUBAGENTS_WORKTREE_DIR` | path | Git worktree root for isolated runs |
-| `CYRUP_SUBAGENTS_TEMP_ROOT` | path | Root for nested-run temporary artifacts |
-| `CYRUP_SUBAGENT_BINARY`, `CYRUP_SUBAGENT_STEP_BINARY` | path | Override the binary used to spawn children |
-| `CYRUP_SUBAGENTS_MAX_HASH_ENTRIES`, `_FILE_BYTES`, `_TOTAL_BYTES` | numbers | Caps on the worktree change scan |
-
-`CYRUP_SUBAGENT_WAIT_TOOL_ENABLED` has its own vocabulary, trimmed and lowercased: `1`, `true`,
-`yes`, `on` and `enabled` are on; `0`, `false`, `no`, `off` and `disabled` are off. **Anything else
-is a hard configuration error**, not a fallback.
-
-`CYRUP_HOME` (above) also affects subagents: it decides which `~/.cyrup/agents` directory their agent
-files are discovered in.
-
 ## The permission system
 
 Read only when [the permission system](../extensions/permissions.md) is installed.
@@ -342,8 +315,10 @@ cyrup` does nothing. Use `--thinking high`, a `:high` suffix on `--model`, or `S
 interface. The value is republished whenever you change the level, so the next `bash` command sees
 the new one.
 
-cyrup also sets a family of `CYRUP_SUBAGENT_PARENT_*` and `CYRUP_SUBAGENT_CHILD_*` variables on child
-agent processes. They are process plumbing, not configuration; do not set them yourself.
+The permission gate still understands a *spawned* session's plumbing — `CYRUP_SUBAGENT_PARENT_SESSION`
+addresses a child session's parent for ask forwarding, and `CYRUP_SUBAGENT_AGENT_NAME` names the
+persona the gate's `agent` layers enforce for — but cyrup no longer spawns child sessions, so nothing
+in this fork sets them. A launcher that does spawn sessions may set them itself.
 
 ## Variables outside the `CYRUP_` namespace
 

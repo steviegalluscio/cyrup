@@ -14,7 +14,7 @@
 //!
 //! # [CYRUP-DELTA] (SEAM-109) — an argv verb has no upstream counterpart at all
 //!
-//! **pi has NO argv verbs**; see [`crate::subagent_runner_cmd`]'s delta for the check that
+//! **pi has NO argv verbs**; see `crate::subagent_runner_cmd`'s delta for the check that
 //! establishes it (`git -C pi grep -nE 'argv\[2\]|process\.argv' v0.83.0` → nothing, and
 //! `rpc-entry.ts` / `bun/cli.ts` are separate entry points, not verbs).
 //!
@@ -80,7 +80,7 @@ mod tests {
         assert!(!is_selected(&[]));
     }
 
-    /// SEAM-109 — the three hidden argv verbs are cyrup inventions (pi has no argv verbs at all),
+    /// SEAM-109 — the hidden argv verbs are cyrup inventions (pi has no argv verbs at all),
     /// so two things are owed and both are asserted here.
     ///
     /// 1. They stay INVISIBLE. `--help` and the package-subcommand table must not name any of them —
@@ -97,7 +97,6 @@ mod tests {
         let help = crate::cli::render_help(&[]);
         for token in [
             SUBCOMMAND,
-            crate::subagent_runner_cmd::SUBCOMMAND,
             crate::mcp_keyring_helper_cmd::SUBCOMMAND,
         ] {
             assert!(!help.contains(token), "`{token}` must not appear in --help");
@@ -112,11 +111,6 @@ mod tests {
                 "intercom_broker_cmd",
                 include_str!("intercom_broker_cmd.rs"),
                 "broker/spawn.ts",
-            ),
-            (
-                "subagent_runner_cmd",
-                include_str!("subagent_runner_cmd.rs"),
-                "async-execution.ts",
             ),
             (
                 "mcp_keyring_helper_cmd",

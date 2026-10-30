@@ -76,7 +76,6 @@ fn state_for(agent_dir: &Path) -> Arc<SharedIntercomState> {
 fn params_for(agent_dir: &Path) -> ConnectParams {
     ConnectParams {
         agent_dir: agent_dir.to_path_buf(),
-        metadata: None,
         model: Some("test-model".to_string()),
     }
 }
@@ -297,7 +296,6 @@ async fn a_deliberate_shutdown_never_reconnects() {
         agent_dir.path().to_path_buf(),
         PathBuf::from("/tmp/work"),
         load_config(&intercom_dir).expect("config loads"),
-        None,
     )
     .expect("build the extension");
     let ctx = HostCtx::event(

@@ -43,10 +43,8 @@ pub mod outbox;
 pub mod paths;
 pub mod project_pane;
 pub mod project_target;
-pub mod relay;
 pub mod reply_tracker;
 pub mod resources;
-pub mod seams;
 pub mod session_state;
 pub mod tools;
 pub mod transport;
@@ -61,5 +59,4 @@ pub use error::{IntercomError, Result};
 // declares instead of re-spelling the literal.
 pub use extension::{
     EXTENSION_ID, IntercomExtension, intercom_extension_for_env,
-    intercom_extension_for_env_concrete,
 };

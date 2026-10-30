@@ -147,7 +147,7 @@ a session was built, so those three went direct to the network and reported succ
 ## cacheWarming
 
 A provider's prompt cache expires on its own clock — five minutes on Anthropic's short tier, an
-hour on the long one. If a single turn runs longer than that, because a tool call or a subagent
+hour on the long one. If a single turn runs longer than that, because a long tool call
 took a while, the cache entry is gone by the time the next request goes out and you pay a full
 cache **write** of the whole prompt instead of a cheap cache **read**.
 
@@ -343,28 +343,6 @@ egress, or change what cache warming spends.
 
 Non-interactive runs (`-p`, `--mode json`, `--mode rpc`) cannot prompt, so under `ask` an undecided
 project is treated as untrusted.
-
-## The subagents block
-
-The [subagents](../extensions/subagents.md) native extension reads a `subagents` object from the
-merged settings document. cyrup's own configuration layer does not model this block — it is
-preserved as an unknown key, so you can hand-write it and it will survive any settings write.
-
-| Key | Type | Default | Meaning |
-|---|---|---|---|
-| `subagents.agentOverrides.<name>` | object | `{}` | Per-agent override delta, keyed by agent name. |
-| `subagents.defaultModel` | string | *unset* | Fallback model for every subagent. |
-| `subagents.defaultThinking` | string | *unset* | Crate-wide thinking default; a malformed value aborts agent discovery. |
-| `subagents.defaultExtensions` | string[] | *unset* | Extension allowlist applied to agents that declare none. |
-| `subagents.disableBuiltins` | bool | `false` | Exclude the bundled agent personas from discovery. |
-| `subagents.disableThinking` | bool | `false` | Force extended thinking off for all agents. |
-| `subagents.modelScope` | object | *unset* | Model allow-list policy. |
-
-**Subagent settings are read from two different files.** The block above comes from the merged
-`settings.json` pair. Agent *discovery* separately reads a `subagents` object from
-`~/.cyrup/agents/settings.json` (and `<repo>/.cyrup/agents/settings.json`). Those are not the same
-file as `~/.cyrup/agent/settings.json` — note `agents` against `agent` — and a malformed discovery
-settings file aborts discovery rather than falling back to defaults.
 
 ## Legacy keys migrated on load
 

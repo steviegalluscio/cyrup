@@ -34,7 +34,7 @@ mode.
 ### cyrup install
 
 Installs a package — a git repository or a local directory that may contain extensions, skills,
-prompt templates, themes and subagent personas.
+prompt templates, themes and skills.
 
 ```sh
 cyrup install git:github.com/user/repo
@@ -396,7 +396,7 @@ checking whether the value names an existing file. Multiple `--append-system-pro
 joined with a blank line.
 
 `--no-extensions` also turns off installed-package extensions and the native extensions
-(subagents, the permission system, intercom, and the built-in MCP one, so the `mcp`
+(the permission system, intercom, and the built-in MCP one, so the `mcp`
 gateway tool does not exist in that run), and removes the built-in [llama.cpp](../llama-cpp.md)
 provider and its `/llama` command. `-e` paths survive it. Relative resource paths resolve
 against the current directory.
@@ -477,8 +477,10 @@ line to the help body. An unrecognised single-dash flag is still a usage error, 
 bare `-`: `cyrup -` prints `Unknown option: -` and exits 1 without contacting a provider. A bare
 `--` is left alone for the extension-flag capture.
 
-Two subcommands, `__intercom-broker` and `__subagent-runner`, exist so cyrup can re-execute itself as
-a child process. They are not part of the user-facing surface and should not be called directly.
+Two hidden verbs, `__intercom-broker` and `__mcp-keyring-helper`, exist so cyrup can re-execute
+itself as a child process — for the intercom broker and for an MCP credential read that has to happen
+inside a fresh keyring session. They are not part of the user-facing surface, they are absent from
+`--help`, and they should not be called directly.
 
 `cyrup --help` also lists `CYRUP_SHARE_VIEWER_URL`. It is read — by `/share`, as the base of the
 viewer link — and the help row now carries its default,

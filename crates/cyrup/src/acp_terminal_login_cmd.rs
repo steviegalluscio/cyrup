@@ -7,7 +7,7 @@
 //!
 //! # Why the predicate differs from its three siblings
 //!
-//! [`crate::subagent_runner_cmd::is_selected`], [`crate::intercom_broker_cmd::is_selected`] and
+//! `crate::subagent_runner_cmd::is_selected`, [`crate::intercom_broker_cmd::is_selected`] and
 //! [`crate::mcp_keyring_helper_cmd::is_selected`] are all `argv.get(1) == Some(SUBCOMMAND)` — the
 //! token is minted by cyrup itself at a known position. This one is
 //! `argv.iter().skip(1).any(…)`, matching upstream's `process.argv.includes`, because the token is
@@ -52,7 +52,7 @@ use std::io::IsTerminal;
 /// The literal argv token. Kept **independent** from `cyrup_acp`'s copy in the
 /// `AuthMethod::Terminal.args` builder and cross-tested against it rather than shared as one
 /// constant across crates — the precedent documented on
-/// [`crate::subagent_runner_cmd::SUBCOMMAND`]: "what the client is told to send" and "what `main`
+/// `crate::subagent_runner_cmd::SUBCOMMAND`: "what the client is told to send" and "what `main`
 /// recognises" must each be free-standing enough to unit-test without the other. `ACP-011`.
 pub const SUBCOMMAND: &str = "--terminal-login";
 

@@ -136,6 +136,16 @@
 )]
 #![forbid(unsafe_code)]
 
+/// The agent name cyrup reports to Herdr, and the name Herdr's own `agent list` records for a cyrup
+/// terminal. Cross-machine discovery filters Herdr's agent rows on exactly this string, so the writer
+/// side and the reader side must agree on it — one constant, in the workspace's single Herdr client,
+/// is what keeps them agreed.
+///
+/// (It used to live in `cyrup-ext-subagents`, which was also the side that PUSHED agent state to
+/// Herdr. Step 4 of docs/LEAN-FORK-PLAN.md deleted that crate; the name is still what Herdr sees,
+/// because Herdr detects it from the terminal itself.)
+pub const AGENT: &str = "cyrup";
+
 pub mod cli;
 pub mod client;
 pub mod env;

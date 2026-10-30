@@ -196,7 +196,7 @@ impl PermissionSystemExtension {
     }
 
     /// PERM-001 — publish this PARENT session's own id as the process-wide parent-session anchor
-    /// (`cyrup_ext_subagents::publish_parent_session_anchor`), the address a subagent child's
+    /// (`crate::primitives::publish_parent_session_anchor`), the address a subagent child's
     /// forwarded ask writes to.
     ///
     /// This is the cyrup placement of pi's `process.env[SUBAGENT_PARENT_SESSION_ENV] = sessionId`
@@ -219,7 +219,7 @@ impl PermissionSystemExtension {
     /// PARENT role only (`install_watcher`). A CHILD must never publish its own id: a depth-2
     /// grandchild would then address its immediate parent's spool instead of continuing to thread
     /// the root's anchor, which is the direct-parent depth-1 semantics
-    /// `cyrup_ext_subagents::PARENT_SESSION_ENV_VAR` documents. Publishing is also unconditional in
+    /// `crate::primitives::PARENT_SESSION_ENV_VAR` documents. Publishing is also unconditional in
     /// `has_ui` (pi's `index.ts:599` is), so a UI-less parent that later gains one still has a
     /// correctly-addressed anchor in place; the watcher, not the anchor, is what `has_ui` gates.
     pub(super) fn publish_parent_session_anchor(&self) {
@@ -229,7 +229,7 @@ impl PermissionSystemExtension {
         if let Some(services) = self.host_services.get()
             && let Some(id) = services.session_id()
         {
-            cyrup_ext_subagents::publish_parent_session_anchor(&id);
+            crate::primitives::publish_parent_session_anchor(&id);
         }
     }
 }

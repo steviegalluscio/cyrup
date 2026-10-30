@@ -364,7 +364,6 @@ async fn live(options: Options, turn: TurnFn, summarize: SummaryFn) -> Live {
             agent_dir.clone(),
             cwd.clone(),
             load_config(&intercom_dir).expect("config loads"),
-            None,
         )
         .expect("build the intercom extension"),
     );

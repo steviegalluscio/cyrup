@@ -476,7 +476,7 @@ impl AskChannel for ForwardingAskChannel {
         // (pi `PI_AGENT_ROUTER_PARENT_SESSION_ID`). Empty/absent ⇒ `wait_for_forwarded_approval`
         // resolves to deny (fail-closed), matching pi's null-target deny (`index.ts:1267-1272`).
         let target =
-            crate::envx::var(cyrup_ext_subagents::PARENT_SESSION_ENV_VAR).unwrap_or_default();
+            crate::envx::var(crate::primitives::PARENT_SESSION_ENV_VAR).unwrap_or_default();
         // pi `getSessionId(ctx)` (`index.ts:960-970`): the requester's own id, else `"unknown"`.
         let requester_session_id = self
             .host_services
@@ -490,7 +490,7 @@ impl AskChannel for ForwardingAskChannel {
         // `resolve_agent_name_from_env` reads for the policy layers); absent/blank ⇒ `"unknown"`,
         // matching pi's `|| "unknown"` fallback. Display-only metadata in the parent prompt, never
         // part of the nonce binding.
-        let requester_agent_name = crate::envx::var(cyrup_ext_subagents::AGENT_NAME_ENV_VAR)
+        let requester_agent_name = crate::envx::var(crate::primitives::AGENT_NAME_ENV_VAR)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "unknown".to_string());
@@ -844,7 +844,7 @@ mod tests {
     #[test]
     #[allow(clippy::unwrap_used)]
     fn forwarding_channel_denies_when_no_parent_anchor() {
-        let _pin = crate::envx::pin(cyrup_ext_subagents::PARENT_SESSION_ENV_VAR, None);
+        let _pin = crate::envx::pin(crate::primitives::PARENT_SESSION_ENV_VAR, None);
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

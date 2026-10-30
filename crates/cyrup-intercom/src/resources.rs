@@ -231,6 +231,10 @@ mod tests {
     /// Session", byte for byte, between Pattern 6 and Pattern 7. This is the text the agent reads to
     /// learn that `handover` exists and that its `message` is the NEXT TASK, not a message body, so
     /// a paraphrase here changes what the model sends.
+    ///
+    /// [CYRUP-DELTA] upstream's Pattern 7 ("Handle Subagent Escalations", `:210-277`) is deleted with
+    /// the subagents extension that supplied `contact_supervisor` (docs/LEAN-FORK-PLAN.md step 4), so
+    /// what follows 6b here is the "Key Differences" table rather than that heading.
     #[test]
     fn the_skill_teaches_handover_with_upstreams_pattern_6b() {
         const PATTERN_6B: &str = "### Pattern 6b: Hand Over Your Session
@@ -261,12 +265,13 @@ editor before it is sent. `/handover` alone opens a picker for the target.
         let pattern_6 = text
             .find("### Pattern 6: Cross-Codebase Peer Messages")
             .expect("Pattern 6 is in the bundled skill");
-        let pattern_7 = text
-            .find("### Pattern 7:")
-            .expect("Pattern 7 is in the bundled skill");
+        let after = text
+            .find("## Key Differences")
+            .expect("the Key Differences table follows the patterns");
         assert!(
-            pattern_6 < at && at + PATTERN_6B.len() == pattern_7,
-            "6b sits after Pattern 6 and immediately before Pattern 7"
+            pattern_6 < at && at + PATTERN_6B.len() == after,
+            "6b sits after Pattern 6 and immediately before the Key Differences table \
+             (upstream's Pattern 7 is deleted here)"
         );
     }
 

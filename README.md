@@ -11,8 +11,10 @@ backbone.
 
 > **Status:** pre-release, at `0.1.0` — see [`CHANGELOG.md`](CHANGELOG.md). The agent loop, provider layer, tool set, session
 > tree, terminal interface, extension host, all five run modes, the MCP client, the ACP adapter, the
-> `workflowScript` runtime, the Flux development pipeline, background and remote subagent delegation,
-> and the [herdr](#herdr) integration work end to end.
+> the Flux development pipeline, cross-session coordination over intercom, and the
+> [herdr](#herdr) integration work end to end. Deleted in this fork: pi's codemode tool, its
+> subagents extension (and with it the `workflowScript` runtime and the herdr status feed) — see
+> [`docs/LEAN-FORK-PLAN.md`](docs/LEAN-FORK-PLAN.md).
 
 | measured at `4fa902b0` (2026-10-11) | |
 |---|---|
@@ -26,7 +28,8 @@ backbone.
 | upstream citations in source | 37,016, naming 21,726 distinct `.ts` locations |
 
 Tests: `cargo nextest run --workspace --features test-fixtures`. `test-fixtures` is required, or the
-two subagent-subprocess fixture binaries never build and their tests silently do not run. Coverage:
+intercom broker and CLI fixture binaries never build and the integration tests that spawn them
+silently do not run. Coverage:
 the same run under `cargo llvm-cov`, see [Measuring coverage](#measuring-coverage). It counts only
 the workspace suite, so crates whose real exercise lives in `cyrup-it` (`cyrup-ext`, `cyrup-ext-sdk`,
 the binary, `cyrup-sdk`) read lower than they are tested.
@@ -43,14 +46,19 @@ and four that each gained more than 40,000 lines:
   half of pi's codemode: the BM25 tool ranker and the ECMAScript string, number and key-comparison
   semantics `cyrup-mcp` and `cyrup-tool-search` share. `cyrup-tool-search` adds pi's `tool_search`
   over deferred tools. pi's `codemode` tool itself — the `deno_core`/V8 sandbox and its script
-  globals — is deleted in this fork (`docs/LEAN-FORK-PLAN.md`); V8 goes with workflowScript.
+  globals — is deleted in this fork, as is the `workflowScript` runtime that was its other V8
+  consumer: no `deno_core`, and no V8, remains in the graph (`docs/LEAN-FORK-PLAN.md`).
 - **The Pico5 durability kernel**, four crates (+35,414) separating a pure document core from the
   imperative shell, the storage contract and a JSONL backend with its lock, marker protocol and
   recovery.
 - **The front-end and the facade.** `cyrup-tui` (+50,147) and `cyrup-session-svc` (+47,126): the
   alternate screen, extension overlay seams, and the host services an extension reads.
 - **Providers and MCP.** `cyrup-provider` (+43,207) and `cyrup-mcp` (+13,409).
-- **Subagent delegation** continued to be the largest crate, at +50,470.
+- **Subagent delegation** was the largest single addition, at +50,470 — `cyrup-ext-subagents` and its
+  1,500-file surface. It has since been deleted here (step 4 of
+  [`docs/LEAN-FORK-PLAN.md`](docs/LEAN-FORK-PLAN.md)), together with the `workflowScript` runtime that
+  lived inside it, the `__subagent-runner`/`__subagent-inspector` hops, the TUI fleet roster and
+  inspector, and the herdr agent-status feed.
 
 
 ## Install
@@ -119,25 +127,29 @@ the command palette.
   [editor's agent](docs/guide/guides/zed-acp.md). The terminal interface runs in the
   alternate-screen renderer by default — mouse capture, a scrollbar, text selection and image
   support; `--tui-mode regular` (or `"tuiMode": "regular"`) keeps the terminal's normal scrollback.
-- **Subagent delegation** in the foreground or background, as single runs, chains, parallel fans
-  or `workflowScript` plans, where the agent writes its orchestration once as JavaScript and the plan
-  runs without further inference. Background runs survive a restart via a session index and durable
-  replay, can be steered, detached, waited on (`bg_wait`) and inspected, and are watched by a child
-  watchdog with model-fallback chains. Children can be placed on a herdr saved machine. All 18 of
-  upstream's `/subagents-*` slash commands are present, and a fleet roster in the TUI lets you pick a
-  running child with the keyboard and open its inspector.
-- **A runtime permission gate** over every tool call, a **Unix-socket broker** for
-  supervisor-to-subagent coordination, and the **Flux** development pipeline.
+- **A runtime permission gate** over every tool call — layered allow/ask/deny policy, a TUI dialog,
+  and ask-forwarding from a child session up to the one with a human on it.
+- **A Unix-socket broker (intercom)** so concurrent cyrup sessions, on one machine or several over
+  SSH, can list each other, send messages, ask and reply, and hand a session over with a generated
+  brief. `/intercom`, `/intercom-id`, `/alias` and `/handover`, an Alt+M roster, a compose overlay
+  and a handover picker.
+- **The Flux development pipeline** — `new → ask → split → aug → exec → qa → tests → commit →
+  create-pr` over file-persisted task state, so a crash or a fresh session resumes mid-pipeline.
 - **MCP over stdio and OAuth-protected HTTP**, with sampling, elicitation and a JSON-RPC wire tracer.
 
 ## herdr
 
-Run cyrup inside [herdr](https://github.com/herdr) and the herdr sidebar shows which pane is
-blocked waiting on you: permission and MCP dialogs raise the signal, and it is released on exit so
-no phantom `working` row is left behind. An agent can open, drive, inspect and close inspector and
-project panes through seven tool verbs, and subagents can run on a herdr saved machine, with events
-and exit relayed back to the supervisor. Without herdr installed, every herdr surface reports that
-it is unavailable and does nothing else.
+cyrup speaks herdr's protocol through one client crate, `cyrup-herdr`: it finds the pane it is
+running in, labels intercom's session roster by pane, launches a session into a Herdr project pane
+for `/handover` and `intercom`'s `name@machine` targets, and lists the cyrup sessions on your saved
+Herdr machines over SSH.
+
+[CYRUP-DELTA] Deleting the subagents extension (step 4 of
+[`docs/LEAN-FORK-PLAN.md`](docs/LEAN-FORK-PLAN.md)) removed the herdr *status feed* — cyrup no longer
+pushes `working`/`blocked` agent state per pane, so the sidebar shows what herdr detects from the
+terminal itself — and the seven `inspector.*` / `project.*` tool verbs, which were actions of the
+single `subagent` tool. Without herdr installed, every herdr surface reports that it is unavailable
+and does nothing else.
 
 ## Extensions are WebAssembly components
 
@@ -161,41 +173,12 @@ The constraint that comes with it: values cross the boundary as data, not refere
 an extension a live object, cyrup passes a serialized value or an explicit round-trip, which shapes
 what an extension API can look like.
 
-Five larger subsystems ship as native built-in extensions rather than WASM, because they supervise
-OS processes, own Unix sockets, or speak JSON-RPC to child processes: subagent delegation, the
-permission gate, the intercom broker, the MCP client, and Flux. The first three are default-off and
-arm on their own environment flag (`CYRUP_SUBAGENTS`, `CYRUP_PERMISSION_SYSTEM`, `CYRUP_INTERCOM`)
-or on the presence of a config file. Dropping a policy file into a repository is enough to arm the
-permission gate. Flux and MCP attach unconditionally: Flux disables itself inside a subagent child
-process, and MCP stays inert until it finds an `mcp.json`.
-
-## Agent-authored workflows run on an embedded V8
-
-The static `chain`/`parallel` subagent plan cannot branch on a result, and branching in the
-orchestrator's own loop costs a full inference round-trip plus a context payload per branch.
-`workflowScript` lets the agent write the plan once — plain JavaScript, top-level `await`, `runs.*`
-— and the plan then executes with no further inference. It ships inside `cyrup-ext-subagents`, so it
-arms with `CYRUP_SUBAGENTS` like the rest of that subsystem.
-
-Upstream runs these scripts in a bare `vm.createContext({ runs, Promise, emit, console })`. cyrup
-embeds V8 through `deno_core` and reproduces exactly that capability set: `runs`, `emit`, `console`
-and every ECMAScript built-in are present; `setTimeout`, `fetch`, `require`, `Buffer`, `process`,
-`TextEncoder`, `URL`, `crypto`, `eval` and `new Function` are not. The realm is assembled by the host
-in one call before any agent script exists, so no script can observe a half-installed sandbox, and
-the two optional globals the protocol allows — `state` and `runs.host` — are installed only when the
-embedding host grants them.
-
-Timers are excluded on purpose rather than by limitation — `deno_core` would supply them — because a
-workflow's waits are waits on *work*, and every `runs.*` call blocks on a real event that appears in
-the trace, on the live card, and is cancellable. Because the contract is a closed set, cyrup's
-analyzer enforces it at `action:"validate"` time and rejects a script reaching for `setTimeout`
-*before a child is spent*, where upstream discovers it as a runtime `ReferenceError` after the fact.
-
-`cyrup-workflow-runtime` exists for one mechanical reason, recorded here because it looks arbitrary
-otherwise: a Cargo build script is compiled and run before its own crate's `src/`, so it can never
-import from the crate whose build it is running. The ops and `prelude.js` therefore live in a
-dependency-free crate that `cyrup-ext-subagents/build.rs` takes as a `[build-dependencies]` entry,
-snapshots, and `include_bytes!`s back as `RuntimeOptions.startup_snapshot`.
+Four larger subsystems ship as native built-in extensions rather than WASM, because they supervise OS
+processes, own Unix sockets, or speak JSON-RPC to child processes: the permission gate, the intercom
+broker, the MCP client, and Flux. Two are default-off and arm on their own environment flag
+(`CYRUP_PERMISSION_SYSTEM`, `CYRUP_INTERCOM`) or on the presence of a config file. Dropping a policy
+file into a repository is enough to arm the permission gate. Flux and MCP attach unconditionally: MCP
+stays inert until it finds an `mcp.json`.
 
 ## Why Rust
 
@@ -208,8 +191,8 @@ session tree in memory and repaints a terminal.
 - **Predictable memory.** A session tree with thousands of entries and a long transcript stays flat,
   with no GC pause in the middle of a token stream.
 - **Real concurrency.** Parallel tool calls, a streaming provider response, a terminal repaint and
-  several subagent processes are separate tasks on a work-stealing runtime rather than callbacks on
-  one loop.
+  every subprocess — a bash command, an MCP server, the intercom broker — is a separate task on a
+  work-stealing runtime rather than a callback on one loop.
 - **Cancellation that stops the work.** Dropping a future actually cancels it. This is also the
   sharpest edge in the codebase, since cleanup has to survive a drop.
 - **An enforced no-panic policy.** `unwrap`, `expect`, `panic!` and raw indexing are denied
@@ -259,12 +242,10 @@ it, not by coverage. Dependencies point downward only. `cyrup-core` depends on n
 | `cyrup-sdk` | 944 | 0.0% | public embeddable API |
 | `cyrup-session-svc` | 90,012 | 91.6% | the `AgentSession` facade wiring everything together |
 | `cyrup` | 28,221 | 74.7% | the CLI binary |
-| `cyrup-ext-subagents` | 451,714 | 91.2% | OS-subprocess subagent delegation and the `workflowScript` runtime (the largest crate) |
-| `cyrup-workflow-runtime` | 322 | 63.9% | `workflowScript`'s `deno_core` ops and `prelude.js`, split out so a consumer's `build.rs` can snapshot them |
 | `cyrup-permission-system` | 23,903 | 85.8% | runtime allow / ask / deny policy over every tool call |
-| `cyrup-intercom` | 46,883 | 79.3% | Unix-socket broker for supervisor-to-subagent coordination |
+| `cyrup-intercom` | 46,883 | 79.3% | Unix-socket broker for coordination between sessions |
 | `cyrup-flux` | 5,275 | 98.0% | the Flux structured development pipeline |
-| `cyrup-herdr` | 13,797 | 86.7% | the one client for herdr's NDJSON socket API: typed methods, event subscription, reconnect, the pane status bridge |
+| `cyrup-herdr` | 13,797 | 86.7% | the one client for herdr's NDJSON socket API: typed methods, event subscription, reconnect |
 | `cyrup-mcp` | 93,340 | 84.8% | MCP client: servers, tools, OAuth, sampling, elicitation, wire tracer, the `/mcp` surface |
 | `cyrup-acp` | 21,539 | 94.1% | Agent Client Protocol adapter: an editor (Zed is the reference client) drives cyrup over ACP JSON-RPC on stdio |
 | `cyrup-llama` | 21,654 | 96.5% | llama.cpp router support: provider, model discovery, Hugging Face search and the `/llama` manager, as a native extension |
@@ -281,6 +262,9 @@ it, not by coverage. Dependencies point downward only. `cyrup-core` depends on n
 
 ## Documentation
 
+The two largest rows above, `cyrup-ext-subagents` (451,714 lines) and `cyrup-workflow-runtime` (322),
+have since been deleted here — see [`docs/LEAN-FORK-PLAN.md`](docs/LEAN-FORK-PLAN.md).
+
 The user guide lives under [`docs/guide/`](docs/guide/introduction.md) as an
 [mdBook](https://rust-lang.github.io/mdBook/):
 
@@ -292,13 +276,12 @@ mdbook serve   # http://localhost:3000, live-reloads on save
 - [Install](docs/guide/getting-started/install.md) · [Connect a provider](docs/guide/getting-started/authenticate.md) · [Your first session](docs/guide/getting-started/first-session.md)
 - [The terminal interface](docs/guide/guides/tui.md) · [sessions](docs/guide/guides/sessions.md) · [models and thinking](docs/guide/guides/models.md) · [tools and permissions](docs/guide/guides/tools-and-permissions.md)
 - [Scripting and automation](docs/guide/guides/scripting.md) · [Zed and other ACP editors](docs/guide/guides/zed-acp.md)
-- [How extensions work](docs/guide/extensions/overview.md) · [subagents](docs/guide/extensions/subagents.md) · [permissions](docs/guide/extensions/permissions.md) · [intercom](docs/guide/extensions/intercom.md) · [Flux](docs/guide/extensions/flux.md)
+- [How extensions work](docs/guide/extensions/overview.md) · [permissions](docs/guide/extensions/permissions.md) · [intercom](docs/guide/extensions/intercom.md) · [Flux](docs/guide/extensions/flux.md)
 - [CLI reference](docs/guide/reference/cli.md) · [`settings.json`](docs/guide/reference/settings.md) · [environment variables](docs/guide/reference/environment.md) · [keybindings](docs/guide/reference/keybindings.md) · [troubleshooting](docs/guide/reference/troubleshooting.md)
 
-The guide has no MCP chapter and no `workflowScript` chapter yet. Until they land,
-`docs/gap-analysis/13-cyrup-mcp.md` and the module docs in `crates/cyrup-mcp/src/` are the reference
-for MCP, and `crates/cyrup-ext-subagents/src/workflows/scripted/mod.rs` is the reference for
-workflows.
+The guide has no MCP chapter yet. Until it lands, `docs/gap-analysis/13-cyrup-mcp.md` and the module
+docs in `crates/cyrup-mcp/src/` are the reference for MCP. (`workflowScript` was deleted in this fork
+rather than documented: [`docs/LEAN-FORK-PLAN.md`](docs/LEAN-FORK-PLAN.md).)
 
 ## Building and testing
 
@@ -350,18 +333,18 @@ instrumented build takes about 11 GB.
 ### The integration suite
 
 Almost all tests are unit tests inline under `crates/*/src/`. The heavy ones, which spawn the binary,
-drive a subagent, load a WASM component, open a broker socket or talk to a real MCP server child
+drive a live session, load a WASM component, open a broker socket or talk to a real MCP server child
 process, live in one gated crate:
 
 ```sh
 cargo build -p cyrup-ext-sdk --target wasm32-wasip2
-cargo nextest run -p cyrup-it --features it        # ~860 test functions across 11 binaries
+cargo nextest run -p cyrup-it --features it        # ~700 test functions across 9 binaries
 ```
 
 `cyrup-it` is behind `required-features = ["it"]`, so the everyday gate never builds it. Its
 `build.rs` resolves the fixture binaries and the WASM component once. It carries eleven targets, one
-per subsystem (`subagents`, `verify_redaction`, `intercom`, `ext`, `permission`, `mcp`,
-`session_svc`, `bin`, `misc`, `llama`, `llama_live`), so a `process::exit`, an abort or a segfault in
+per subsystem (`intercom`, `ext`, `permission`, `mcp`, `session_svc`, `bin`, `misc`, `llama`,
+`llama_live`), so a `process::exit`, an abort or a segfault in
 one cannot take the others down with no report. `llama_live` drives a real `llama-server` and
 reports each of its tests as skipped, on stderr, unless `LLAMA_SERVER_BIN` and
 `CYRUP_LLAMA_MODELS_DIR` are both set.
@@ -376,8 +359,7 @@ bare `cargo build --workspace --bins`:
 
 ```sh
 cargo build -p cyrup --features faux --bin cyrup                 # `faux` is what --model faux/faux-1 reaches
-cargo build -p cyrup-intercom --features test-fixtures --bins    # broker, child fixture, scripting client
-cargo build -p cyrup-ext-subagents --features test-fixtures --bins
+cargo build -p cyrup-intercom --features test-fixtures --bins    # broker + scripting client
 cargo build -p cyrup-ext-sdk --target wasm32-wasip2
 export CYRUP_IT_BIN_DIR="$PWD/target/debug"
 export CYRUP_EXT_FIXTURE_COMPONENT="$PWD/target/wasm32-wasip2/debug/cyrup_ext_sdk.wasm"
@@ -437,7 +419,7 @@ so that fixes landed after each release are in scope; see
 | upstream | followed by | newest tag | ledger measured to |
 |---|---|---|---|
 | `earendil-works/pi` | most crates | v1.1.0 | `f1b2e77f5` = v1.1.0+11 |
-| `nicobailon/pi-subagents` | `cyrup-ext-subagents` | v0.76.1 | `ad11b7ab` = v0.76.1+29 (ported surface ≈ v0.68.0) |
+| ~~`nicobailon/pi-subagents`~~ | ~~`cyrup-ext-subagents`~~ | — | deleted in this fork; the ledger rows that referenced it were closed at deletion (`docs/LEAN-FORK-PLAN.md`) |
 | `MasuRii/pi-permission-system` | `cyrup-permission-system` | v0.8.0 | v0.8.0 |
 | `nicobailon/pi-intercom` | `cyrup-intercom` | v0.16.1 | v0.16.1 |
 | `nicobailon/pi-mcp-adapter` | `cyrup-mcp` | v5.1.0 | `2ccf648` = v5.1.0+3 |

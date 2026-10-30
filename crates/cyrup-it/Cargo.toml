@@ -111,7 +111,6 @@ cyrup-acp               = { workspace = true }
 cyrup-tui               = { workspace = true, features = ["scrollback-accumulator"] }
 cyrup-intercom          = { workspace = true }
 cyrup-permission-system = { workspace = true }
-cyrup-ext-subagents     = { workspace = true }
 # The `pi-mcp-adapter` port (gap-analysis 13). `tests/mcp/` builds a REAL `AgentSession` with the
 # adapter attached the way `crates/cyrup/src/main.rs` attaches it, so it needs the extension type by
 # name. A dev edge only — this crate has no `[lib]`/`[dependencies]`, so it cannot reach the
@@ -154,11 +153,6 @@ serde_json = { workspace = true }
 # cyrup type parses them) to compare them with `cyrup-llama-cpp-wire`'s definitions, and tails its
 # `GET /models/sse` stream. The same client every cyrup HTTP path already links.
 reqwest    = { workspace = true }
-# `tests/subagents/background_cascade_integration.rs` has a generic
-# `read_json<T: serde::de::DeserializeOwned>` helper, so it names the `serde` trait directly rather
-# than going through `serde_json`'s re-exports. It resolved in the source crate because
-# cyrup-ext-subagents carries serde as a normal dependency; here it needs its own dev-dep entry.
-serde      = { workspace = true }
 tempfile   = { workspace = true }
 # No `[workspace.dependencies]` entry exists for anyhow (only `crates/cyrup` declares it, as a
 # bin-only external at crates/cyrup/Cargo.toml:85). Declared literally here at the same version
@@ -187,19 +181,6 @@ serde_json = { workspace = true }
 #
 # One binary per crate, not one for the workspace, also means a `process::exit`, an abort or a
 # segfault in one crate's seam cannot take the other six down with no report (§4 R6).
-
-[[test]]
-name              = "subagents"
-path              = "tests/subagents/main.rs"
-required-features = ["it"]
-
-[[test]]
-# Its own target because its single test mutates this process's environment to prove the INHERITED
-# credential branch, and `unsafe { set_var }` is only sound with no concurrent reader — which is
-# true here exactly because this binary holds one test. See the file's own module doc.
-name              = "verify_redaction"
-path              = "tests/verify_redaction/main.rs"
-required-features = ["it"]
 
 [[test]]
 name              = "intercom"

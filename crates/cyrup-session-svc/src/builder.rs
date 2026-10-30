@@ -142,15 +142,16 @@ pub struct SessionConfig {
     /// SEAM-071: "the extension set" means pi's PATH tier in ALL of its forms, not just the
     /// disk-discovery roots. It drops the project + global roots, the package tier
     /// (`ext_crate_paths`, which is pi's `enabledExtensions`), and the AMBIENT native built-ins —
-    /// cyrup's `cyrup-permission-system` / `cyrup-intercom` / `subagents` stand in for upstream's
-    /// `@gotgenes/pi-permission-system`, pi-intercom and pi-subagents, which are ordinary installed
-    /// packages in exactly the tier `noExtensions` removes.
+    /// cyrup's `cyrup-permission-system` / `cyrup-intercom` stand in for upstream's
+    /// `@gotgenes/pi-permission-system` and pi-intercom, which are ordinary installed packages in
+    /// exactly the tier `noExtensions` removes.
     ///
     /// It does NOT drop pi's INLINE tier — `extensionFactories`, loaded unconditionally
     /// (`resource-loader.ts:579-581` over `main.ts:523`) — which is what a native handed to
     /// [`SessionBuilder::with_native_extension`] by an embedder is. See
-    /// [`native_survives_no_extensions`] for the discriminator and for the one carve-out pi makes in
-    /// a subagent child.
+    /// [`native_survives_no_extensions`] for the discriminator. Pi's one carve-out from that flag —
+    /// a subagent child re-injects three extensions by path — is gone here with the subagents
+    /// extension (docs/LEAN-FORK-PLAN.md step 4), so the flag has no exceptions left.
     pub no_extensions: bool,
     /// Ids of native built-in extensions this session does not load (pi
     /// `resourceLoaderOptions.disabledBuiltinExtensions`, `main.ts` @v1.0.4, which `--no-mcp` sets
@@ -1493,7 +1494,7 @@ impl SessionBuilder {
         // attach later (steps 6/10 + the mode entry point) and the captured `Arc` observes them.
         let native_services: Arc<dyn cyrup_ext::host::HostServices> = host_services.clone();
         // EXT-S01: CONTAIN a native extension's load/`init` failure. This loop used to propagate the
-        // first error with a bare `?`, so one built-in (permission-system, intercom, subagents)
+        // first error with a bare `?`, so one built-in (permission-system, intercom)
         // failing `init` took the ENTIRE session down — no session at all, and the remaining natives
         // were never even attempted. Pi records a per-extension load failure and keeps building
         // (`LoadExtensionsResult.errors`, surfaced as `Failed to load extension "<path>": <err>`,
@@ -1514,8 +1515,7 @@ impl SessionBuilder {
         // `noExtensions` reduces THAT tier to the explicit `-e` paths alone
         // (`resource-loader.ts:451-452`, `:555-557` @v0.83.0). It does not touch pi's inline
         // `extensionFactories` tier, and neither does this — see `native_survives_no_extensions`.
-        let is_subagent_child = std::env::var_os(SUBAGENT_CHILD_ENV).is_some();
-        for ext in natives_to_load(native_extensions, cfg.no_extensions, is_subagent_child) {
+        for ext in natives_to_load(native_extensions, cfg.no_extensions) {
             let id = ext.id();
             if let Err(e) = host
                 .load_native_with_services(ext, native_services.clone())
@@ -3354,10 +3354,10 @@ pub(crate) fn tool_contribution(tool: &Arc<dyn cyrup_core::Tool>) -> ToolPromptC
 /// NATIVES ARE OPT-IN. Pi's module cache holds FACTORIES, not instances (`loader.ts:148,414-437`),
 /// so its second pass calls the factory again against a fresh `Extension` + `ExtensionAPI`. A cyrup
 /// native has no such re-instantiation: it is a process-lifetime `Arc<dyn NativeExtension>`, so
-/// loading it here would call `init` TWICE ON THE SAME OBJECT. That is not theoretical —
-/// `cyrup-ext-subagents`' `ChildSafe` arm spawns a detached nested-control-inbox poller from `init`,
-/// and a second one would race the first over the same inbox — and the trigger is the common case
-/// (any repo with a `.cyrup/` directory; a subagent child re-execs with no `--approve`). So only
+/// loading it here would call `init` TWICE ON THE SAME OBJECT. That is not theoretical — the
+/// subagents native, before this fork deleted it, spawned a detached nested-control-inbox poller
+/// from `init`, and a second one would have raced the first over the same inbox — and the trigger is
+/// the common case (any repo with a `.cyrup/` directory). So only
 /// natives that answer `NativeExtension::decides_project_trust` — whose contract is "my `init` is
 /// idempotent" — take part. WASM guests always do: a guest load builds a fresh instance in a fresh
 /// store, which IS Pi's fresh-per-factory-call semantics.
@@ -3419,10 +3419,9 @@ async fn pre_trust_extension_verdict(
     // SEAM-071: a native that `--no-extensions` will not load must not vote on project trust
     // either — pi's pre-trust pass (`loadProjectTrustExtensions()`) runs over the SAME reduced set
     // its main pass does, because both read `extensionPaths` (resource-loader.ts:451-455 @v0.83.0).
-    let is_subagent_child = std::env::var_os(SUBAGENT_CHILD_ENV).is_some();
     let voters = natives
         .iter()
-        .filter(|e| !cfg.no_extensions || native_survives_no_extensions(e, is_subagent_child));
+        .filter(|e| !cfg.no_extensions || native_survives_no_extensions(e));
     for ext in voters.filter(|e| e.decides_project_trust()) {
         // A load failure in the throwaway pass must not fail the build — the real load at step 4b
         // surfaces it. Skip and keep polling the rest.
@@ -3497,35 +3496,6 @@ fn wasm_host_or_native_only(config: HostConfig, force_failure: bool) -> Extensio
     }
 }
 
-/// The subagent-child marker (`cyrup_ext_subagents::spawn::nested_events::CHILD_ENV`). Read as a
-/// literal rather than imported because `cyrup-session-svc` sits BELOW `cyrup-ext-subagents` in the
-/// crate graph — the natives are injected into the builder from `crates/cyrup/src/main.rs`, which is
-/// the only place that depends on both. See [`native_survives_no_extensions`] for why the builder
-/// needs to know.
-const SUBAGENT_CHILD_ENV: &str = "CYRUP_SUBAGENT_CHILD";
-
-/// The natives a subagent CHILD keeps across `--no-extensions`, and only a child (SEAM-071).
-///
-/// pi's subagent launcher passes `--no-extensions` to the child whenever the agent pins an extension
-/// allowlist, and in the SAME breath re-adds three extensions as explicit `--extension <path>` args:
-/// `PROMPT_RUNTIME_EXTENSION_PATH`, the fanout-child extension when the child is fanout-authorized,
-/// and the resolved `@gotgenes/pi-permission-system` — `pi-subagents v0.47.1
-/// src/runs/shared/pi-args.ts:413-420` (`runtimeExtensions`) emitted at `:556-560`. So in pi a child
-/// under `--no-extensions` keeps exactly these three and loses everything else, pi-intercom included.
-///
-/// cyrup selects the same three by ENV rather than by path — `subagent_extension_for_env`,
-/// `prompt_runtime_extension_for_env`, `permission_extension_for_env` in `crates/cyrup/src/main.rs`
-/// — because its child-side runtime is compiled in, not a loadable file (the mechanism note at
-/// `cyrup-ext-subagents/src/exec/mod.rs:1495-1499`). Env-selection IS cyrup's re-injection channel,
-/// so gating these three in a child would drop what pi explicitly keeps — and for
-/// `cyrup-permission-system` that is a permission gate failing OPEN, which is worse than the
-/// unfiltered load SEAM-071 was filed about.
-const SUBAGENT_CHILD_RUNTIME_NATIVES: [&str; 3] = [
-    "cyrup-permission-system",
-    "subagent-prompt-runtime",
-    "subagents",
-];
-
 /// Whether a native built-in survives `--no-extensions` (SEAM-071).
 ///
 /// The discriminator is [`cyrup_ext::NativeExtension::is_ambient`], declared by each built-in on
@@ -3538,16 +3508,18 @@ const SUBAGENT_CHILD_RUNTIME_NATIVES: [&str; 3] = [
 /// `loadFinalExtensionSet` calls `loadExtensionFactories` unconditionally (`resource-loader.ts:579-581`
 /// @v0.83.0) over `extensionFactories = [...builtInExtensions, ...(options?.extensionFactories ?? [])]`
 /// (`main.ts:523`), while only `extensionPaths` — the PATH tier — is collapsed by the flag (`:451-453`).
-fn native_survives_no_extensions(ext: &Arc<dyn NativeExtension>, is_subagent_child: bool) -> bool {
-    let id = ext.id();
-    let id = id.as_str();
+///
+/// [CYRUP-DELTA] pi's one exception to the flag is gone. A pi subagent child that was launched with
+/// `--no-extensions` re-injects three extensions by explicit `--extension <path>` — the prompt
+/// runtime, the fanout child extension and `@gotgenes/pi-permission-system` (`pi-subagents v0.47.1
+/// src/runs/shared/pi-args.ts:413-420`, emitted at `:556-560`) — and cyrup ported that as an env
+/// carve-out keyed on `CYRUP_SUBAGENT_CHILD` so a child would never run with its permission gate
+/// dropped. The subagents extension that set that marker, and the child mode it described, are
+/// deleted (docs/LEAN-FORK-PLAN.md step 4), so no process can be a child and no ambient native can
+/// survive the flag.
+fn native_survives_no_extensions(ext: &Arc<dyn NativeExtension>) -> bool {
     // pi's inline-factory tier: never gated by a flag about discovery.
-    if !ext.is_ambient() {
-        return true;
-    }
-    // The ambient tier, plus pi's one carve-out: a subagent child keeps the extensions its launcher
-    // re-injects by path (see [`SUBAGENT_CHILD_RUNTIME_NATIVES`]).
-    is_subagent_child && SUBAGENT_CHILD_RUNTIME_NATIVES.contains(&id)
+    !ext.is_ambient()
 }
 
 /// `natives` without the built-ins `disabled` names by id (pi `resourceLoaderOptions.
@@ -3575,7 +3547,6 @@ fn without_disabled_builtins(
 fn natives_to_load(
     natives: Vec<Arc<dyn NativeExtension>>,
     no_extensions: bool,
-    is_subagent_child: bool,
 ) -> Vec<Arc<dyn NativeExtension>> {
     if !no_extensions {
         return natives;
@@ -3583,7 +3554,7 @@ fn natives_to_load(
     natives
         .into_iter()
         .filter(|e| {
-            let keep = native_survives_no_extensions(e, is_subagent_child);
+            let keep = native_survives_no_extensions(e);
             if !keep {
                 tracing::debug!(extension = %e.id(), "native built-in skipped: --no-extensions");
             }
@@ -4220,13 +4191,11 @@ mod tests {
         }
     }
 
-    /// The four shipped built-ins (pi's INSTALLED-package tier) plus one embedder-supplied
+    /// The shipped built-ins (pi's INSTALLED-package tier) plus one embedder-supplied
     /// extension (pi's INLINE-factory tier) — the two tiers `noExtensions` treats differently.
     fn stubs() -> Vec<std::sync::Arc<dyn cyrup_ext::NativeExtension>> {
         [
             ("cyrup-permission-system", true),
-            ("subagents", true),
-            ("subagent-prompt-runtime", true),
             ("cyrup-intercom", true),
             ("an-embedders-own-extension", false),
         ]
@@ -4245,42 +4214,41 @@ mod tests {
     /// Without the flag nothing changes — the whole point is that this is a FLAG, not a policy.
     #[test]
     fn every_native_loads_without_no_extensions() {
-        assert_eq!(ids(&super::natives_to_load(stubs(), false, false)).len(), 5);
-        assert_eq!(ids(&super::natives_to_load(stubs(), false, true)).len(), 5);
+        assert_eq!(ids(&super::natives_to_load(stubs(), false)).len(), 3);
     }
 
     /// `--no-mcp` is `disabledBuiltinExtensions: ["mcp"]` (`main.ts` @v1.0.4): the named built-in
     /// is not loaded, in any tier, and the rest are. Without the flag nothing is dropped.
     #[test]
     fn a_disabled_builtin_is_not_loaded_and_the_rest_are() {
-        let disabled = vec!["subagents".to_string(), "no-such-extension".to_string()];
+        let disabled = vec!["cyrup-intercom".to_string(), "no-such-extension".to_string()];
         assert_eq!(
             ids(&super::without_disabled_builtins(stubs(), &disabled)),
             [
                 "cyrup-permission-system",
-                "subagent-prompt-runtime",
-                "cyrup-intercom",
                 "an-embedders-own-extension"
             ]
         );
         assert_eq!(
             ids(&super::without_disabled_builtins(stubs(), &[])).len(),
-            5
+            3
         );
     }
 
-    /// A ROOT session under `--no-extensions` loads none of the four shipped built-ins. pi's
+    /// A ROOT session under `--no-extensions` loads none of the shipped built-ins. pi's
     /// `noExtensions` reduces the path tier to the explicit `-e` paths (`const extensionPaths =
     /// this.noExtensions ? cliEnabledExtensions : this.mergePaths(...)`, resource-loader.ts:451-452
     /// @v0.83.0), and `@gotgenes/pi-permission-system`, pi-intercom and pi-subagents are ordinary
-    /// installed packages living in exactly that tier upstream.
+    /// installed packages living in exactly that tier upstream. This fork has no second tier for the
+    /// flag to spare: pi's subagent-child carve-out is deleted with the subagents extension, so the
+    /// ambient natives simply go (see `native_survives_no_extensions`).
     #[test]
     fn no_extensions_drops_every_ambient_native_in_a_root_session() {
-        let kept = ids(&super::natives_to_load(stubs(), true, false));
+        let kept = ids(&super::natives_to_load(stubs(), true));
         assert_eq!(
             kept,
             vec!["an-embedders-own-extension".to_string()],
-            "the four shipped built-ins go; the inline one stays"
+            "the shipped built-ins go; the inline one stays"
         );
     }
 
@@ -4292,13 +4260,11 @@ mod tests {
     /// Ten test files in this workspace rely on exactly that combination.
     #[test]
     fn an_extension_the_embedder_passed_by_hand_survives_no_extensions() {
-        for child in [false, true] {
-            assert!(
-                ids(&super::natives_to_load(stubs(), true, child))
-                    .contains(&"an-embedders-own-extension".to_string()),
-                "inline tier survives (is_subagent_child={child})"
-            );
-        }
+        assert!(
+            ids(&super::natives_to_load(stubs(), true))
+                .contains(&"an-embedders-own-extension".to_string()),
+            "inline tier survives"
+        );
     }
 
     /// SEAM-074, the regression that motivated it: an INLINE extension whose id happens to collide
@@ -4315,68 +4281,12 @@ mod tests {
         let inline_double = |id: &str| -> std::sync::Arc<dyn cyrup_ext::NativeExtension> {
             std::sync::Arc::new(StubNative(cyrup_core::ExtensionId::from(id), false))
         };
-        for id in [
-            "subagents",
-            "cyrup-permission-system",
-            "cyrup-intercom",
-            "subagent-prompt-runtime",
-        ] {
-            for child in [false, true] {
-                assert!(
-                    super::native_survives_no_extensions(&inline_double(id), child),
-                    "a by-value extension named {id} is pi's inline tier and must load \
-                     (is_subagent_child={child})"
-                );
-            }
-        }
-    }
-
-    /// A subagent CHILD keeps exactly the three pi re-injects by path, and pi-intercom is not one of
-    /// them: `runtimeExtensions = [PROMPT_RUNTIME_EXTENSION_PATH, fanout-child when authorized,
-    /// permSystemExt]` (pi-subagents v0.47.1 `src/runs/shared/pi-args.ts:413-417`), emitted as
-    /// `--extension <path>` right after the `--no-extensions` it pairs with (`:556-560`). Dropping
-    /// the permission system here would be a permission gate failing OPEN.
-    #[test]
-    fn a_subagent_child_keeps_exactly_the_natives_pi_re_injects() {
-        let kept = ids(&super::natives_to_load(stubs(), true, true));
-        assert_eq!(
-            kept,
-            vec![
-                "cyrup-permission-system".to_string(),
-                "subagents".to_string(),
-                "subagent-prompt-runtime".to_string(),
-                "an-embedders-own-extension".to_string(),
-            ],
-            "load order preserved, intercom dropped"
-        );
-        assert!(
-            !kept.contains(&"cyrup-intercom".to_string()),
-            "pi re-injects no intercom"
-        );
-    }
-
-    /// The exemption is CHILD-only. A root session that happens to have the permission system
-    /// installed still drops it under `--no-extensions`, exactly as pi does — pi only re-adds it
-    /// from the subagent launcher, never from `main.ts`.
-    #[test]
-    fn the_child_exemption_does_not_leak_into_a_root_session() {
-        let one = |id: &str| -> std::sync::Arc<dyn cyrup_ext::NativeExtension> {
-            std::sync::Arc::new(StubNative(cyrup_core::ExtensionId::from(id), true))
-        };
-        for id in super::SUBAGENT_CHILD_RUNTIME_NATIVES {
+        for id in ["subagents", "cyrup-permission-system", "cyrup-intercom"] {
             assert!(
-                super::native_survives_no_extensions(&one(id), true),
-                "{id} survives in a child"
-            );
-            assert!(
-                !super::native_survives_no_extensions(&one(id), false),
-                "{id} drops at the root"
+                super::native_survives_no_extensions(&inline_double(id)),
+                "a by-value extension named {id} is pi's inline tier and must load"
             );
         }
-        assert!(!super::native_survives_no_extensions(
-            &one("cyrup-intercom"),
-            true
-        ));
     }
 
     /// CFG-010 (dedupe half) — Pi's `dedupePackages` keeps BOTH entries, delta first, when a

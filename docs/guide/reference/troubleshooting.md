@@ -54,7 +54,7 @@ CYRUP_OFFLINE=1 cyrup
 ```
 
 The same rule applies to `CYRUP_SKIP_VERSION_CHECK` and `CYRUP_TELEMETRY`. The extension opt-ins —
-`CYRUP_SUBAGENTS`, `CYRUP_INTERCOM`, `CYRUP_PERMISSION_SYSTEM` — use a wider rule that does trim
+`CYRUP_INTERCOM`, `CYRUP_PERMISSION_SYSTEM` — use a wider rule that does trim
 and does accept `on`, which is why `on` appears to work for some variables and not others.
 
 ## Project settings, skills or extensions are not loading
@@ -115,17 +115,8 @@ CYRUP_AGENT_DIR=/opt/cyrup-agent cyrup
 
 `CYRUP_HOME` is read by the native extensions only. `CYRUP_CODING_AGENT_DIR` does move the config —
 the config layer accepts it as a fallback when `CYRUP_AGENT_DIR` is unset — but it means a different
-directory, `~/.cyrup` with no `agent` segment, and it also moves the intercom and subagent trees.
+directory, `~/.cyrup` with no `agent` segment, and it also moves the intercom tree.
 The three are compared side by side in [Environment variables](environment.md).
-
-## Subagent files are not discovered
-
-The subagents home is `~/.cyrup/agents` — not `~/.cyrup/agent/agents`. The singular `agent`
-directory is where `settings.json` lives; the plural `agents` directory is where agent definitions
-live. Project agents go in `<repo>/.cyrup/agents`.
-
-Two other reasons a file is skipped: it is missing a `name` or a `description` in its frontmatter,
-or it sits under a path segment named `skills`. See [Subagents](../extensions/subagents.md).
 
 ## `cyrup update` does not update cyrup
 
@@ -213,15 +204,6 @@ Raise the limit, or remove the extension.
 `cargo install --git ...` compiles a large dependency graph, including the WebAssembly host. A cold
 build takes many minutes on a laptop and produces long stretches with no output. It is not hung —
 run cargo with `-v` if you want to watch it move.
-
-## A "not valid subagents config JSON" warning
-
-`<agent dir>/subagents/config.json` failed to parse. cyrup warns on stderr and continues with the
-default subagent configuration, so nothing is broken — but none of your settings in that file are
-in effect.
-
-One case is easy to miss: an unrecognised key inside the `missions` block rejects the **whole
-file**, not just that block. Check spelling there first.
 
 ## `httpIdleTimeoutMs` errors on startup
 

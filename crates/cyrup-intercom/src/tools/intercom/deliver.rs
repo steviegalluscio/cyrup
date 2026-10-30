@@ -249,7 +249,7 @@ impl IntercomTool {
             // session claims to be, in the remote host's terms. The name is
             // `buildPresenceIdentity`'s, so the origin matches the address local peers already hold.
             let origin = crate::cross_machine::CrossMachineOrigin {
-                name: crate::connect::presence_identity_name(&self.state, None).unwrap_or_default(),
+                name: crate::connect::presence_identity_name(&self.state).unwrap_or_default(),
                 session_id: client
                     .session_id()
                     .or_else(|| crate::connect::resolved_intercom_session_id(&self.state))

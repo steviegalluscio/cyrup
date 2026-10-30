@@ -54,7 +54,6 @@ mod audit_logging;
 mod config_command;
 mod context_hygiene;
 mod empty_command_truthiness;
-mod forwarding_spawn_env;
 mod forwarding_subprocess;
 mod gate_integration;
 mod human_dialog;

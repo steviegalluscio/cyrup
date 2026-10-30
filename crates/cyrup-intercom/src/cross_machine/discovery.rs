@@ -90,7 +90,7 @@ pub struct DiscoveredRemoteAgent {
 /// Every way `name@machine` fails to resolve. `Display` is upstream's sentence for each arm, with
 /// the crate's `pi` → `cyrup` product-name substitution in [`Self::NoAgentMatch`] and
 /// [`Self::AmbiguousAgent`] (upstream says "Pi agent"; the agent kind cyrup reports to Herdr is
-/// [`cyrup_ext_subagents::herdr::AGENT`]).
+/// [`cyrup_herdr::AGENT`]).
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DiscoveryError {
     /// `parseCrossMachineTarget` (`:82`): not exactly one `@`, or a blank or whitespace-bearing
@@ -214,7 +214,7 @@ pub fn parse_saved_machines(raw: &str) -> Result<Vec<SavedMachine>, DiscoveryErr
 ///
 /// Only `{agents: [...]}` — a bare array is NOT accepted here, unlike the machine catalog (`:62`).
 /// Each row must carry the agent kind this product reports to Herdr
-/// ([`cyrup_ext_subagents::herdr::AGENT`], upstream's `row.agent !== "pi"`), and the name falls
+/// ([`cyrup_herdr::AGENT`], upstream's `row.agent !== "pi"`), and the name falls
 /// back to the session id recovered from `agent_session.value` because "Herdr only reports a name
 /// for renamed panes; an unnamed Pi session is addressed by its session id" (`:68`). A row with
 /// neither is skipped — it has no address.
@@ -232,7 +232,7 @@ pub fn parse_remote_agents(raw: &str) -> Result<Vec<RemoteAgent>, DiscoveryError
         .filter_map(|row| {
             let record = row.as_object()?;
             if record.get("agent").and_then(serde_json::Value::as_str)
-                != Some(cyrup_ext_subagents::herdr::AGENT)
+                != Some(cyrup_herdr::AGENT)
             {
                 return None;
             }

@@ -2,7 +2,7 @@
 
 An extension is a WebAssembly component that cyrup loads into your session and runs inside a
 capability sandbox the host enforces. This page covers what an extension can and cannot reach,
-where cyrup looks for them, and the four native extensions that ship inside the binary.
+where cyrup looks for them, and the three native extensions that ship inside the binary.
 
 ## What an extension is
 
@@ -128,40 +128,29 @@ extension you are working on:
 cyrup --no-extensions -e ./target/wasm32-wasip2/debug/my_ext.wasm
 ```
 
-One further carve-out applies only inside a [subagent](subagents.md) child process: a child run with
-`--no-extensions` keeps the permission system, the subagents runtime and its prompt runtime, because
-its parent re-injects those deliberately. Turning the permission gate off in a parent therefore does
-not turn it off in that parent's children. Intercom is not on that list and does go away.
+## The three native extensions
 
-## The four native extensions
-
-Four larger subsystems are compiled into the binary rather than loaded from disk. They are native
+Three larger subsystems are compiled into the binary rather than loaded from disk. They are native
 extensions, and they behave like extensions in every way that matters: they register tools, slash
 commands and UI, and `--no-extensions` turns them off along with everything else.
 
-**Three of the four are off by default.** Each one arms on its own environment variable *or* on the
+**Two of the three are off by default.** Each one arms on its own environment variable *or* on the
 mere presence of its config file. The config-file half is the one that surprises people — you can
 turn a native extension on without ever setting a variable, by creating a file and nothing else.
-
-[Subagents](subagents.md) delegates work to child `cyrup` processes, each with its own persona,
-model, tool set and depth budget. Runs go in the foreground or the background, in chains, in
-parallel fan-out, and optionally inside an isolated git worktree. Arm it with `CYRUP_SUBAGENTS=1` or
-by creating `~/.cyrup/agent/subagents/config.json`.
 
 [The permission system](permissions.md) is an allow / ask / deny gate in front of every tool call,
 driven by a layered policy file. Arm it with `CYRUP_PERMISSION_SYSTEM=1` — or by dropping a
 `cyrup-permissions.jsonc` policy file anywhere it looks, which is enough on its own. That page leads
 with the consequences.
 
-[Intercom](intercom.md) is a Unix-socket broker that lets concurrent cyrup sessions and subagent
-children find each other and exchange messages, asks and replies. Arm it with `CYRUP_INTERCOM=1` or
+[Intercom](intercom.md) is a Unix-socket broker that lets concurrent cyrup sessions find each other
+and exchange messages, asks and replies. Arm it with `CYRUP_INTERCOM=1` or
 by creating `~/.cyrup/agent/intercom/config.json`. Unix only in this milestone.
 
-[Flux](flux.md) is the fourth, and it's the exception to "off by default": it is attached
+[Flux](flux.md) is the third, and it's the exception to "off by default": it is attached
 unconditionally, with no environment variable and no config file, because the entire point of
 porting it into the binary was that the structured `new → ask → split → aug → exec → qa → tests →
-commit → create-pr` pipeline works with no install step. It turns itself off only inside a
-subagent child process.
+commit → create-pr` pipeline works with no install step.
 
 ## Where to go next
 

@@ -26,13 +26,16 @@
 //!   a per-write `<path>.<pid>.<uuid>.tmp` created O_EXCL, chmod 600, renamed into place.
 //! - **`0o700` session dirs** (pi `ensureDirectoryExists`, `index.ts:1030-1039`).
 //! - **safe-token + contains-root guard** on the encoded session id BEFORE any `Path::join`
-//!   (reusing `cyrup_ext_subagents::{validate_safe_token, validate_contains_root}`, P-5, R-PERM-040).
+//!   (reusing [`crate::primitives::path_tokens`]'s `validate_safe_token` /
+//!   `validate_contains_root`, P-5, R-PERM-040).
 //!
 //! ## Reuse (P-5 building blocks)
 //!
-//! `validate_safe_token` / `validate_contains_root` / `CONTROL_INBOX_POLL_INTERVAL` come from
-//! `cyrup-ext-subagents::background::control`; the request-inbox directory watch mirrors that module's
-//! `watch_control_inbox` `notify::PollWatcher` pattern. The spool MECHANISM is pi's own.
+//! `validate_safe_token` / `validate_contains_root` / [`crate::primitives::CONTROL_INBOX_POLL_INTERVAL`]
+//! and the liveness/ownership ladder this module judges `no-ui` by live in [`crate::primitives`],
+//! vendored out of the deleted `cyrup-ext-subagents` crate (docs/LEAN-FORK-PLAN.md step 4); the
+//! request-inbox directory watch mirrors that crate's `watch_control_inbox` `notify::PollWatcher`
+//! pattern. The spool MECHANISM is pi's own.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -43,16 +46,11 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 use cyrup_ext::{HostServices, NotifyKind};
-use cyrup_ext_subagents::background::async_retention::machine_hostname;
-use cyrup_ext_subagents::background::reconcile::{
-    Liveness, check_pid_liveness_probing_zombie, current_pid_namespace_scope,
-};
-use cyrup_ext_subagents::background::session_lease::{
-    OwnerStamp, ProcessStartIdentity, owner_demonstrably_gone, process_start_identity,
-    runtime_start_identity,
-};
-use cyrup_ext_subagents::{
-    CONTROL_INBOX_POLL_INTERVAL, validate_contains_root, validate_safe_token,
+use crate::primitives::{
+    CONTROL_INBOX_POLL_INTERVAL, Liveness, OwnerStamp, ProcessStartIdentity,
+    check_pid_liveness_probing_zombie, current_pid_namespace_scope, machine_hostname,
+    owner_demonstrably_gone, process_start_identity, runtime_start_identity, validate_contains_root,
+    validate_safe_token,
 };
 
 use crate::ask::{

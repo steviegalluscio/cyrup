@@ -1,14 +1,15 @@
-//! The two intercom tools registered via `InitApi::register_tool`:
+//! The intercom tool registered via `InitApi::register_tool` — [`intercom::IntercomTool`]
+//! (`intercom`), always registered (`index.ts:1425-1806`).
 //!
-//! - [`intercom::IntercomTool`] (`intercom`) — always registered (`index.ts:1425-1806`).
-//! - [`contact_supervisor::ContactSupervisorTool`] (`contact_supervisor`) — registered ONLY when
-//!   child-orchestrator metadata is present (`index.ts:1162-1163`).
+//! [CYRUP-DELTA] docs/LEAN-FORK-PLAN.md step 4 deletes pi's subagents extension, and with it
+//! pi-intercom's second tool, `contact_supervisor` (registered only when child-orchestrator
+//! metadata was present, `index.ts:1162-1163`): a "supervisor" is by definition a subagent
+//! parent, so the tool had nothing to talk to once nothing spawned children.
 //!
-//! Both are `cyrup_core::Tool` impls backed by the shared [`crate::session_state::SharedIntercomState`]
+//! It is `cyrup_core::Tool` impls backed by the shared [`crate::session_state::SharedIntercomState`]
 //! (its live [`crate::transport::client::IntercomClient`], [`crate::reply_tracker`] state, and the
 //! outbound single-slot waiter).
 
-pub mod contact_supervisor;
 pub mod intercom;
 pub(crate) mod render;
 

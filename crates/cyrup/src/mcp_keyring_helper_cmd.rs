@@ -34,7 +34,7 @@
 //!
 //! # [CYRUP-DELTA] (SEAM-109) — an argv verb has no upstream counterpart at all
 //!
-//! **pi has NO argv verbs**; see [`crate::subagent_runner_cmd`]'s delta for the check that
+//! **pi has NO argv verbs**; see `crate::subagent_runner_cmd`'s delta for the check that
 //! establishes it (`git -C pi grep -nE 'argv\[2\]|process\.argv' v0.83.0` → nothing, and
 //! `rpc-entry.ts` / `bun/cli.ts` are separate entry points, not verbs).
 //!

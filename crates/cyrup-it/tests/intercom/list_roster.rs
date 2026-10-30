@@ -79,7 +79,6 @@ async fn list_and_list_cwd_collapse_to_a_one_line_roster() {
         PathBuf::from("/nonexistent-agent-dir"),
         PathBuf::from("/tmp/work"),
         IntercomConfig::default(),
-        None,
     )
     .expect("build the intercom extension");
     let sink = || -> Box<dyn FnMut(ToolUpdate) + Send + 'static> { Box::new(|_| {}) };

@@ -50,7 +50,7 @@ async fn child(
     let pins = vec![
         crate::envx::pin(CHILD_ENV_VAR, Some("1")),
         crate::envx::pin(
-            cyrup_ext_subagents::PARENT_SESSION_ENV_VAR,
+            crate::primitives::PARENT_SESSION_ENV_VAR,
             Some(root_session),
         ),
         crate::envx::pin(CHILD_WAIT_TIMEOUT_ENV, Some(wait_ms)),
@@ -148,7 +148,7 @@ fn plant_marker_of_a_dead_root(agent_dir: &Path, session: &str) {
             "sessionId": session,
             "createdAt": 1,
             "pid": pid,
-            "hostname": cyrup_ext_subagents::background::async_retention::machine_hostname(),
+            "hostname": crate::primitives::machine_hostname(),
         })
         .to_string(),
     )

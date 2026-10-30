@@ -69,7 +69,6 @@ async fn connected_client(
             agent_dir.to_path_buf(),
             PathBuf::from("/tmp/work"),
             load_config(&intercom_dir).expect("config loads"),
-            None,
         )
         .expect("build the extension"),
     );

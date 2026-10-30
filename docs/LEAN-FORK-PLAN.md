@@ -107,13 +107,82 @@ What the step touched beyond the plan's "self-contained" line:
   on purpose: it is a tool *exposure* that `tool_search` and the MCP adapter use, not the deleted tool
   (and `cyrup-codemode` itself stays, per D2, until the step 3 rename).
 
+**Step 2 — absorbed by step 4, not run separately.** The plan assumed workflowScript could be removed
+on its own. It cannot be removed *usefully*: `cyrup-workflow-runtime` had exactly one consumer,
+`cyrup-ext-subagents/src/workflows/scripted/`, and its `build.rs` compiled the V8 startup snapshot for
+that crate alone. Deleting the scripted runtime would have kept a 1,500-file crate alive to host
+nothing. So step 2's payload — `cyrup-workflow-runtime`, `workflows/scripted/`, the snapshot build
+step, and the `deno_core` / `deno_ast` / `deno_error` and `fancy-regex` dependency entries — went with
+step 4. **V8 is now out of the graph entirely**, which is what step 2 existed to buy.
+
+**Step 3 — not done.** `cyrup-codemode` still carries its old name. It survives step 1 for the reason
+D2 gives (BM25 ranking + the ECMAScript string/number/key semantics shared by `cyrup-mcp` and
+`cyrup-tool-search`). The rename is still a standalone commit, kept free of deletions so
+`git log --follow` survives.
+
+**Step 4 — DONE on `lean/4-subagents`.** `cyrup-ext-subagents` (451,714 lines) and
+`cyrup-workflow-runtime` are deleted, along with `deno_core`/`deno_ast`/`deno_error`/`fancy-regex`.
+Beyond the plan's list:
+
+- **The CLI hops.** `__subagent-runner` and `__subagent-inspector` are gone from `predispatch`'s
+  `Internal` enum, their dispatch arms and `set_process_name` calls are gone from `main.rs`, and
+  `subagent_config.rs` / `subagent_runner_cmd.rs` / `subagent_inspector_cmd.rs` are deleted. Three
+  internal subcommands remain: `__intercom-broker`, `__mcp-keyring-helper`, `__acp-terminal-login`.
+  `predispatch`'s gate count went seven → five.
+- **`cyrup-permission-system` keeps its semantics, by vendoring ~750 lines.** It was not a mere
+test dependency: the gate's ask-forwarding and its parent-session anchor read process liveness, PID
+namespace scope, start-time identity, hostname, and the safe-path-token validators out of
+`cyrup-ext-subagents`. Those primitives were lifted into `cyrup-permission-system/src/primitives/`
+unchanged — liveness probe, `OwnerStamp`/`ProcessStartIdentity`/`owner_demonstrably_gone`, the
+published-parent-session anchor register, `validate_safe_token`/`validate_contains_root` (now a local
+`PathTokenError` instead of `SubagentError`), `machine_hostname`, the inbox poll interval, and the
+`CYRUP_SUBAGENT_*` env names the anchor register still writes and reads. Dropping them would have
+turned "forward the ask to the session with a human on it" into a silent local-only fallback.
+- **`cyrup-intercom` lost its subagent half (3,051 lines), not its feature.** Deleted: `seams.rs` (the
+run-status/steer/terminate channel), `tools/contact_supervisor.rs`, `relay.rs`, the child fixture
+binary, `ChildOrchestratorMetadata` + its reader + `preferred_supervisor_target` +
+`format_child_orchestrator_message`, the native supervisor-channel probe, and
+`ConnectParams::metadata`. Session identity claim/registration types the claimant crate used to
+provide were vendored into `identity.rs`, and `cyrup_herdr::AGENT` ("cyrup") replaces the constant the
+deleted crate exported for `name@machine` discovery. Broker, roster, `/intercom`, `/alias`,
+`/handover`, pane labelling and cross-machine discovery are untouched. **intercom itself is kept** —
+10 crates reference it and permission ask-forwarding rides its broker.
+- **`cyrup-session-svc` lost the subagent-child tier.** `CYRUP_SUBAGENT_CHILD` gated which ambient
+natives survived `--no-extensions`, because pi re-injects three extensions by path into a child so a
+child never runs with its permission gate dropped. No process can be a child any more, so
+`SUBAGENT_CHILD_ENV`, `SUBAGENT_CHILD_RUNTIME_NATIVES` and the `is_subagent_child` threading through
+`native_survives_no_extensions` / `natives_to_load` are gone. SEAM-071's actual rule (PATH tier drops,
+inline tier survives) is unchanged.
+- **`cyrup-flux` no longer disables itself in a child** (`CYRUP_SUBAGENT_CHILD`), the guard's stated
+reason being that a child would re-exec the binary per pipeline phase. Nested sessions were never
+gated and still attach normally.
+- **Accepted per D3/D4.** The herdr Agents-sidebar status feed and the seven `inspector.*` /
+`project.*` tool verbs are gone — they were a module of the deleted crate and actions of the single
+`subagent` tool. `cyrup-herdr` survives as the client intercom uses. Rebuilding the sidebar as a WASM
+guest stays the optional follow-up below.
+- **Tests.** `cyrup-it`'s `subagents` target (and its `build.rs` fixture entries) plus the
+subagent-only `verify_redaction`, `child_bridge_activation`, `human_surface`, `shared_human_lock` and
+`permission/forwarding_spawn_env` targets/modules are deleted; `intercom/broker_roundtrip` is kept and
+simplified. The suite went 11 binaries → 9, ~862 → ~700 test functions. Kept and passing: `intercom`
+170, `permission` 49, `bin` 90, `misc` 4, `session_svc` 60, `ext` 80 (the WASM host is unaffected,
+per D6). Deleted with nothing to replace them: `cyrup-flux/tests/flux_002_subagent_fallback.rs` and
+the two session-svc child-exemption tests.
+- **Docs.** `docs/guide/extensions/subagents.md` deleted with its SUMMARY entry; the `subagents`
+settings block, its two troubleshooting entries, README's feature/herdr/V8/workflowScript sections,
+the crate table, the `cyrup-it` run recipe and the upstream-port table row are updated. The
+intercom-bundled `pi-intercom` skill lost its "Pattern 7: Handle Subagent Escalations" section (the
+ordering test in `resources.rs` now pins 6b against the Key Differences table). Prose in
+`docs/gap-analysis/` — including the `09-cyrup-ext-subagents.md` ledger — is left as the historical
+record it is rather than rewritten.
+
 ## Order
 
-`1 → 2 → 3 → 4`
+Planned `1 → 2 → 3 → 4`; taken **`1 → 4`** with step 2 absorbed (see above), step 3 still open.
 
 Each step is its own branch off the previous, so any can be abandoned without losing the earlier ones.
 Re-measure build size and time after step 2 — that is where codemode and V8 are gone, and it is the
-natural point to decide whether step 4 is worth taking.
+natural point to decide whether step 4 is worth taking. In the event, V8 left at step 4: no
+`deno_core`, no `libv8`, and the largest crate in the workspace is gone.
 
 ## Optional follow-up
 

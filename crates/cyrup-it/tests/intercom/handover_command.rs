@@ -339,7 +339,6 @@ impl Live {
                 agent_dir.path().to_path_buf(),
                 cwd.to_path_buf(),
                 load_config(&intercom_dir).expect("config loads"),
-                None,
             )
             .expect("build the extension"),
         );

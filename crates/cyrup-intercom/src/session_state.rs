@@ -192,7 +192,7 @@ pub struct SharedIntercomState {
     /// [`crate::extension::IntercomExtension::new`] so [`Self::sync_presence_identity`] derives the
     /// same presence name `crate::connect::build_registration` did. Upstream needs no equivalent:
     /// `buildPresenceIdentity` is a closure over the extension scope and every caller is inside it.
-    presence_metadata: Mutex<Option<crate::identity::ChildOrchestratorMetadata>>,
+
     /// `lastPresenceName` + `lastPresenceRuntimeFallbackAlias` (`v0.10.1 index.ts:513`, `:514`) —
     /// what the name poll diffs against so it emits a `Presence` frame on a CHANGE, not once per
     /// tick.
@@ -264,7 +264,6 @@ impl SharedIntercomState {
             held_inbound: Mutex::new(VecDeque::new()),
             held_inbound_timer: Mutex::new(None),
             held_inbound_timer_serial: std::sync::atomic::AtomicU64::new(0),
-            presence_metadata: Mutex::new(None),
             last_presence_identity: Mutex::new(None),
             name_poll_task: Mutex::new(None),
             connect: crate::connect::ConnectSupervisor::default(),
@@ -853,16 +852,10 @@ impl SharedIntercomState {
     /// does not heartbeat the name. This is upstream's third and last name-sync point; the other two
     /// (`turn_start`, every `intercom` tool call) are the cheap 80% and need no timer at all.
     pub fn start_name_poll(self: &Arc<Self>) {
-        let metadata = self
-            .presence_metadata
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
         *self
             .last_presence_identity
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) =
-            Some(crate::connect::presence_identity(self, metadata.as_ref()));
+            .unwrap_or_else(|e| e.into_inner()) = Some(crate::connect::presence_identity(self));
         let interval = std::time::Duration::from_millis(crate::identity::name_poll_ms());
         let state = self.clone();
         let handle = tokio::spawn(async move {
@@ -877,12 +870,7 @@ impl SharedIntercomState {
                 if state.client().is_none() {
                     continue;
                 }
-                let metadata = state
-                    .presence_metadata
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone();
-                let identity = crate::connect::presence_identity(&state, metadata.as_ref());
+                let identity = crate::connect::presence_identity(&state);
                 let changed = state
                     .last_presence_identity
                     .lock()
@@ -961,27 +949,8 @@ impl SharedIntercomState {
         add(services.as_ref().and_then(|s| s.session_id()));
         add(self_id);
         add(services.as_ref().and_then(|s| s.session_name()));
-        let metadata = self
-            .presence_metadata
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        add(crate::connect::presence_identity_name(
-            self,
-            metadata.as_ref(),
-        ));
+        add(crate::connect::presence_identity_name(self));
         targets.contains(&to.trim().to_lowercase())
-    }
-
-    /// Publish this session's child-orchestrator metadata for [`Self::sync_presence_identity`].
-    pub fn set_presence_metadata(
-        &self,
-        metadata: Option<crate::identity::ChildOrchestratorMetadata>,
-    ) {
-        *self
-            .presence_metadata
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = metadata;
     }
 
     /// `syncPresenceIdentity(sessionId)` (`v0.10.1 index.ts:808-815`) — re-derive the presence NAME
@@ -995,12 +964,7 @@ impl SharedIntercomState {
         let Some(client) = self.client() else {
             return;
         };
-        let metadata = self
-            .presence_metadata
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        let identity = crate::connect::presence_identity(self, metadata.as_ref());
+        let identity = crate::connect::presence_identity(self);
         // `lastPresenceName = identity.name; lastPresenceRuntimeFallbackAlias = …`
         // (`v0.10.1 index.ts:813-814`) — every sync updates the poll's baseline, so a rename that
         // reached the broker through `turn_start` or a tool call does not also fire from the poll.

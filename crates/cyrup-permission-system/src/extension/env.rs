@@ -7,15 +7,15 @@
 
 /// The subagent-child env flag (value `"1"`) — literally the SAME const `cyrup-ext-subagents`
 /// writes into every spawned child's env overlay
-/// ([`cyrup_ext_subagents::spawn::nested_events::child_role_env`], driven from
+/// (`cyrup_ext_subagents::spawn::nested_events::child_role_env`, driven from
 /// `exec::build_attempt_spawn_plan`).
 ///
 /// Aliased rather than re-typed as a literal: this crate ALREADY depends on `cyrup-ext-subagents`
 /// (P-5, see `Cargo.toml`) and `ask.rs` already reads
-/// `cyrup_ext_subagents::PARENT_SESSION_ENV_VAR` through that dependency, so the duplicate string
+/// `crate::primitives::PARENT_SESSION_ENV_VAR` through that dependency, so the duplicate string
 /// bought nothing and could silently drift out of agreement with the writer — which is exactly the
 /// failure mode PERM-001 was: the gate read a name nothing on the spawn path ever wrote.
-pub const CHILD_ENV_VAR: &str = cyrup_ext_subagents::spawn::nested_events::CHILD_ENV;
+pub const CHILD_ENV_VAR: &str = crate::primitives::CHILD_ENV;
 
 /// pi `SUBAGENT_ENV_HINT_KEYS` (`permission-forwarding.ts:9`) — the env keys whose presence means
 /// "this process is running as a subagent child", ORed on any NON-EMPTY value by
@@ -36,8 +36,8 @@ pub const CHILD_ENV_VAR: &str = cyrup_ext_subagents::spawn::nested_events::CHILD
 /// PARENT role and can host the forwarding watcher.
 pub const SUBAGENT_ENV_HINT_KEYS: [&str; 3] = [
     CHILD_ENV_VAR,
-    cyrup_ext_subagents::spawn::nested_events::RUN_ID_ENV,
-    cyrup_ext_subagents::AGENT_NAME_ENV_VAR,
+    crate::primitives::RUN_ID_ENV,
+    crate::primitives::AGENT_NAME_ENV_VAR,
 ];
 
 /// The explicit opt-in flag (DI-5): set truthy to force-install the gate even with no policy file.
@@ -80,7 +80,7 @@ pub const POLICY_AGENT_DIR_ENV_KEY: &str = "CYRUP_PERMISSION_SYSTEM_POLICY_AGENT
 
 /// pi `resolveAgentName` (`index.ts:2033-2047`) for cyrup's process-per-subagent model: the resolved
 /// persona name this process was spawned as, read from the `CYRUP_SUBAGENT_AGENT_NAME` env var
-/// (`cyrup_ext_subagents::AGENT_NAME_ENV_VAR`) — captured ONCE (the child IS its persona for its whole
+/// (`crate::primitives::AGENT_NAME_ENV_VAR`) — captured ONCE (the child IS its persona for its whole
 /// lifetime), the exact equivalent of pi's in-process `active_agent` session entry / `<active_agent>`
 /// prompt tag for a separate-process subagent. Trimmed; empty/absent → `None` (pi `normalizeAgentName`
 /// null-normalization + the normalized-`""` top-level: a top-level process has no such var, so the
@@ -88,7 +88,7 @@ pub const POLICY_AGENT_DIR_ENV_KEY: &str = "CYRUP_PERMISSION_SYSTEM_POLICY_AGENT
 /// [`crate::envx::var`], the crate's ONE environment accessor — the same one the sibling
 /// `CYRUP_SUBAGENT_*` anchors go through (`ask.rs` `PARENT_SESSION_ENV_VAR`, `is_subagent_child`).
 pub(super) fn resolve_agent_name_from_env() -> Option<String> {
-    crate::envx::var(cyrup_ext_subagents::AGENT_NAME_ENV_VAR)
+    crate::envx::var(crate::primitives::AGENT_NAME_ENV_VAR)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }

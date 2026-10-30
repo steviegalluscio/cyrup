@@ -5,12 +5,10 @@ commit → create-pr`. Each stage is a slash command that reads and writes plain
 on disk, so a crash or a fresh session never loses pipeline state — the next `/flux/*` command
 picks up exactly where the task files left off.
 
-Unlike [subagents](subagents.md), [the permission system](permissions.md) and
-[intercom](intercom.md), Flux is not gated behind an environment variable or a config file. It is a
-[native extension](overview.md) compiled into the binary and attached unconditionally at startup —
-the whole point of moving it into cyrup is that it works with no install step. The one place it
-turns itself off is inside a [subagent](subagents.md) child process, so a child spawned to do one
-focused task doesn't inherit fifteen pipeline commands and a skill for a workflow it isn't running.
+Unlike [the permission system](permissions.md) and [intercom](intercom.md), Flux is not gated behind
+an environment variable or a config file. It is a [native extension](overview.md) compiled into the
+binary and attached unconditionally at startup — the whole point of moving it into cyrup is that it
+works with no install step.
 
 ## What you get
 
@@ -56,12 +54,13 @@ new -> ask -> split -> aug -> exec -> qa -> tests -> commit -> create-pr
 | 9 | `/flux/create-pr` | Opens a PR from the branch; safe to re-run, shows the existing PR if one is already open |
 
 `aug`, `exec` and `qa` share one argument grammar: a filename processes that one task, a bare
-integer `N` fans the work out across `N` parallel subagents over every file in `todo/`, `1` or
-`all` processes every task file sequentially, and no argument at all lists `todo/*.md` and asks
-which to run. The `N` form needs the `subagent` tool, which only the opt-in
-[subagents](subagents.md) extension provides (`CYRUP_SUBAGENTS=1` or a `subagents/config.json`);
-Flux itself is always on, so without that opt-in `N` tells you once that subagents are not
-available and runs the tasks sequentially instead.
+integer `N` asks for `N` parallel workers over every file in `todo/`, `1` or `all` processes every
+task file sequentially, and no argument at all lists `todo/*.md` and asks which to run.
+
+**In this fork `N` runs sequentially.** Parallel fan-out needs a delegation tool in the model's tool
+list, and this fork does not ship one (the subagents extension is deleted — see
+`docs/LEAN-FORK-PLAN.md`). The templates check for it, say once that it is not available, and process
+the task files one at a time. The pipeline itself is unchanged; only the fan-out is unavailable.
 
 Three more pipelines exist alongside the core one:
 
@@ -115,5 +114,4 @@ ls ~/.flux/$(printf '%s' "$(pwd -P)" | tr -cs 'a-zA-Z0-9' '-')/todo/
 ## Where to go next
 
 [How extensions work](overview.md) covers the native-extension mechanism Flux uses to ship inside
-the binary. [Subagents](subagents.md) is what powers Flux's `N`-way parallel fan-out in `aug`,
-`exec` and `qa`.
+the binary.

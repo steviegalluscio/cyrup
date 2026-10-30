@@ -116,7 +116,7 @@ impl PermissionSystemExtension {
     /// has no UI ([`crate::forwarding::mark_session_unattended`]). No anchor is not an answer: the
     /// forward then fails closed on its own.
     fn forwarding_target_is_unattended(&self) -> bool {
-        crate::envx::var(cyrup_ext_subagents::PARENT_SESSION_ENV_VAR).is_some_and(|anchor| {
+        crate::envx::var(crate::primitives::PARENT_SESSION_ENV_VAR).is_some_and(|anchor| {
             crate::forwarding::session_is_unattended(&self.agent_dir, &anchor)
         })
     }

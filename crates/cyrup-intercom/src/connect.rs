@@ -63,7 +63,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::error::{IntercomError, Result};
-use crate::identity::{ChildOrchestratorMetadata, ENV_INTERCOM_SESSION_ID, presence_name};
+use crate::identity::{ENV_INTERCOM_SESSION_ID, presence_name};
 use crate::inbound::spawn_inbound_loop;
 use crate::session_state::SharedIntercomState;
 use crate::transport::client::IntercomClient;
@@ -106,8 +106,6 @@ pub enum ConnectReason {
 pub struct ConnectParams {
     /// The resolved agent dir (the broker socket + spawn lock live under it).
     pub agent_dir: PathBuf,
-    /// This session's child-orchestrator metadata, when it is a subagent child.
-    pub metadata: Option<ChildOrchestratorMetadata>,
     /// The model id reported in presence (`ctx.model?.id ?? "unknown"`, `index.ts:944`).
     pub model: Option<String>,
 }
@@ -642,7 +640,7 @@ pub fn build_registration(
     state: &SharedIntercomState,
     params: &ConnectParams,
 ) -> SessionRegistration {
-    let identity = presence_identity(state, params.metadata.as_ref());
+    let identity = presence_identity(state);
     SessionRegistration {
         // `{ ...identity }` (`v0.10.1 index.ts:772-774`) — name AND the alias flag.
         runtime_fallback_alias: identity
@@ -721,16 +719,14 @@ pub fn resolved_intercom_session_id(state: &SharedIntercomState) -> Option<Strin
 ///
 /// Extracted out of [`build_registration`] so the registration and every later presence re-sync
 /// produce the SAME string; upstream gets that for free because both go through
-/// `buildPresenceIdentity`. The `metadata.session_name` first tier is cyrup's: a subagent child
-/// registers under the deterministic label its launcher minted, and re-deriving the name from the
-/// host would change the address the parent's `CYRUP_SUBAGENT_ORCHESTRATOR_TARGET` was built
-/// against.
+/// `buildPresenceIdentity`.
+///
+/// [CYRUP-DELTA] docs/LEAN-FORK-PLAN.md step 4 deletes pi's subagents extension, and with it the
+/// child-metadata tier that let a launched child register under the deterministic label its
+/// launcher minted. The name is now always the host's, or the id-derived alias.
 #[must_use]
-pub fn presence_identity_name(
-    state: &SharedIntercomState,
-    metadata: Option<&crate::identity::ChildOrchestratorMetadata>,
-) -> Option<String> {
-    presence_identity(state, metadata).name
+pub fn presence_identity_name(state: &SharedIntercomState) -> Option<String> {
+    presence_identity(state).name
 }
 
 /// `buildPresenceIdentity(pi, sessionId)` (`v0.10.1 index.ts:427-433`) — `{ name,
@@ -747,18 +743,7 @@ pub struct PresenceIdentity {
 
 /// [`PresenceIdentity`] for this session — see [`presence_identity_name`].
 #[must_use]
-pub fn presence_identity(
-    state: &SharedIntercomState,
-    metadata: Option<&crate::identity::ChildOrchestratorMetadata>,
-) -> PresenceIdentity {
-    // A launcher-assigned child label is a CHOSEN name, not a synthesized one, so it clears the
-    // flag exactly as a `/name` would.
-    if let Some(name) = metadata.and_then(|m| m.session_name.clone()) {
-        return PresenceIdentity {
-            name: Some(name),
-            runtime_fallback_alias: false,
-        };
-    }
+pub fn presence_identity(state: &SharedIntercomState) -> PresenceIdentity {
     if let Some(services) = state.host_services()
         && let Some(host_id) = services.session_id().filter(|id| !id.is_empty())
     {
@@ -809,7 +794,6 @@ mod tests {
         std::fs::write(&blocked, b"not a directory").unwrap();
         ConnectParams {
             agent_dir: blocked.join("agent"),
-            metadata: None,
             model: Some("test-model".to_string()),
         }
     }
@@ -1020,7 +1004,7 @@ mod tests {
         let host_only = state();
         host_only.set_host_services(Arc::new(Host(None)));
         assert_eq!(
-            presence_identity(&host_only, None),
+            presence_identity(&host_only),
             PresenceIdentity {
                 name: Some("subagent-chat-0123456789abcdef01".to_string()),
                 runtime_fallback_alias: true,
@@ -1037,7 +1021,7 @@ mod tests {
         ));
         stable.set_host_services(Arc::new(Host(None)));
         assert_eq!(
-            presence_identity_name(&stable, None).as_deref(),
+            presence_identity_name(&stable).as_deref(),
             Some("subagent-chat-stable-worker-7")
         );
         assert_eq!(
@@ -1051,7 +1035,7 @@ mod tests {
             Some("claimed-worker-run1-1")
         );
         assert_eq!(
-            presence_identity(&stable, None),
+            presence_identity(&stable),
             PresenceIdentity {
                 name: Some("subagent-chat-claimed-worker-run".to_string()),
                 runtime_fallback_alias: true,
@@ -1062,7 +1046,7 @@ mod tests {
         named.set_host_services(Arc::new(Host(Some(" worker: fix auth "))));
         named.set_claimed_intercom_session_id(Some("claimed".to_string()));
         assert_eq!(
-            presence_identity(&named, None),
+            presence_identity(&named),
             PresenceIdentity {
                 name: Some("worker: fix auth".to_string()),
                 runtime_fallback_alias: false,

@@ -430,42 +430,38 @@ async fn an_unwritable_managed_root_is_reported_and_the_session_survives() {
 }
 
 #[test]
-fn a_subagent_child_still_gets_no_flux_extension() {
-    // The pre-existing child gate is untouched by the constructor change. It is pinned through
-    // the injected-environment seam (edition-2024 `set_var` is unsafe; the crate forbids unsafe):
-    // `CYRUP_SUBAGENT_CHILD=1` is the one `None`.
+fn every_process_gets_the_flux_extension_and_the_env_selects_its_root() {
+    // [CYRUP-DELTA] This test was `a_subagent_child_still_gets_no_flux_extension`: flux returned
+    // `None` when `CYRUP_SUBAGENT_CHILD=1`. Nothing sets that marker any more — the subagents
+    // extension that did is deleted (docs/LEAN-FORK-PLAN.md step 4) — so the gate is gone and what
+    // the injected-environment seam decides is only which bundled root the extension reads.
     let agent = Path::new("/agent");
-    let child = |key: &str| (key == "CYRUP_SUBAGENT_CHILD").then(|| OsString::from("1"));
-    assert!(
-        cyrup_flux::flux_extension_for_env_from(agent, &child).is_none(),
-        "a subagent child must not get the flux extension"
-    );
-    // Unset, blank, `0` or `true` is a top-level process: the extension on the managed root.
-    for value in [None, Some(""), Some("0"), Some("true")] {
+    // Any value of the old marker, set or unset: the extension, on the managed root.
+    for value in [None, Some(""), Some("0"), Some("1"), Some("true")] {
         let env = |key: &str| {
             (key == "CYRUP_SUBAGENT_CHILD")
                 .then(|| value.map(OsString::from))
                 .flatten()
         };
         let ext = cyrup_flux::flux_extension_for_env_from(agent, &env)
-            .unwrap_or_else(|| panic!("CYRUP_SUBAGENT_CHILD={value:?} is not a child"));
+            .unwrap_or_else(|| panic!("no env value for CYRUP_SUBAGENT_CHILD suppresses flux"));
         assert_eq!(
             ext.bundled_root(),
             &BundledRoot::Managed(managed_root(agent)),
             "CYRUP_SUBAGENT_CHILD={value:?}"
         );
     }
-    // The vendored override travels through the same environment as the gate.
+    // The vendored override travels through the same environment.
     let vendored = |key: &str| {
         (key == BUNDLED_RESOURCES_DIR_ENV_VAR).then(|| OsString::from("/vendored/flux"))
     };
     assert_eq!(
         cyrup_flux::flux_extension_for_env_from(agent, &vendored)
-            .expect("not a child")
+            .expect("the extension always attaches")
             .bundled_root(),
         &BundledRoot::Vendored(PathBuf::from("/vendored/flux"))
     );
-    // And the process-environment shell: this test process is not a child.
+    // And the process-environment shell.
     assert!(cyrup_flux::flux_extension_for_env(agent).is_some());
     assert_eq!(
         cyrup_flux::flux_extension(agent).bundled_root(),

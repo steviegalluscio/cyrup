@@ -132,7 +132,6 @@ async fn slash_intercom_send_appends_an_intercom_sent_entry() {
         agent_dir.path().to_path_buf(),
         PathBuf::from("/tmp/work"),
         load_config(&intercom_dir).expect("config loads"),
-        None,
     )
     .expect("build the extension");
     ext.set_host_services(sink.clone());
@@ -253,7 +252,6 @@ async fn slash_intercom_picker_appends_nothing() {
         agent_dir.path().to_path_buf(),
         PathBuf::from("/tmp/work"),
         load_config(&intercom_dir).expect("config loads"),
-        None,
     )
     .expect("build the extension");
     ext.set_host_services(sink.clone());

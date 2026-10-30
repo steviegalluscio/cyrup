@@ -21,12 +21,18 @@
 # exactly as upstream places it. Its "Humans can run `/handover …`" lines are TRUE as of ICOM-078,
 # which registered the command and its picker.)
 #
+# [CYRUP-DELTA] "Pattern 7: Handle Subagent Escalations (Orchestrator Side)" (upstream `:210-277`),
+# the intro paragraph that pointed at it, and one sentence of Pattern 6's and one of "Visible Peer
+# Sessions" are deleted: they teach `contact_supervisor` and child-bridge metadata, and the
+# subagents extension that supplied them is deleted (docs/LEAN-FORK-PLAN.md, step 4). The file is
+# otherwise upstream v0.16.1 byte for byte under divergence 1.
+#
 # (ICOM-079 also carries v0.13.0 `90e6ad4`'s `/name` -> `/alias` edits, unchanged through v0.16.1:
 # Pattern 1's setup block and "Name sessions meaningfully", upstream `:36-37` and `:331-337`. cyrup
 # registers `/alias` (ICOM-061), so the old `/name` advice named the wrong command for intercom.)
 #
 # YAML comments are ignored by the front-matter parser, exactly as in
-# `cyrup-ext-subagents/resources/agents/researcher.md`.
+# `cyrup-ext-subagents/resources/agents/researcher.md` (that crate is deleted; the parser is not).
 name: pi-intercom
 description: |
   Streamline session-to-session coordination with pi-intercom. Send messages,
@@ -40,10 +46,6 @@ description: |
 Use this skill when you need to coordinate work across multiple pi sessions
 running on the same machine. Pi-intercom enables direct 1:1 messaging between
 sessions for delegation, context sharing, and collaborative workflows.
-
-When you are supervising `pi-subagents`, delegated child agents can escalate to
-you via `contact_supervisor` if `pi-subagents` supplied child bridge metadata.
-This skill covers how to handle those orchestrator-side escalations.
 
 ## When to Use
 
@@ -172,9 +174,9 @@ intercom({
 ```
 
 Only open a Herdr project pane when you need a durable visible peer session in
-that repo. For bounded work, prefer `pi-subagents` with an explicit `cwd`; the
-child can use `contact_supervisor` for owner decisions and regular `intercom`
-for explicit peer coordination.
+that repo. For bounded one-shot work in another repo, run a separate session
+there (`cyrup -p` with an explicit `--working-dir`) and read its output, rather
+than opening a pane you then have to keep.
 
 ```typescript
 intercom({
@@ -207,74 +209,6 @@ intercom({
 Humans can run `/handover <target> [next task]` to review the summary in an
 editor before it is sent. `/handover` alone opens a picker for the target.
 
-### Pattern 7: Handle Subagent Escalations (Orchestrator Side)
-
-When `pi-subagents` spawns a delegated child and supplies child bridge metadata,
-that child can reach you through `contact_supervisor`. You receive a formatted
-message that includes run metadata:
-
-```
-**From subagent-worker-78f659a3-1**
-
-Subagent needs a supervisor decision.
-Run: 78f659a3
-Agent: worker
-Child index: 0
-
-Which API should I use?
-```
-
-**Reply using `reply`:**
-
-```typescript
-// The reply hint in the incoming message will show the exact call:
-intercom({ action: "reply", message: "Use the stable v2 API." })
-```
-
-This works because `reply` resolves the correct sender and message ID automatically.
-
-**Three types of escalations to expect:**
-
-| Type | What it means | How to respond |
-|------|---------------|----------------|
-| `need_decision` | Subagent is blocked and waiting for your answer. Uses the shared ask timeout: 10 minutes by default, configurable with `CYRUP_INTERCOM_ASK_TIMEOUT_MS`. | Reply promptly with a clear decision. If you need more context, ask follow-up questions via `reply`. |
-| `interview_request` | Subagent needs multiple structured answers in one blocking exchange. Uses the shared ask timeout: 10 minutes by default, configurable with `CYRUP_INTERCOM_ASK_TIMEOUT_MS`. | Reply with plain JSON or a fenced `json` block using the provided `{ "responses": [...] }` shape. |
-| `progress_update` | Subagent is sharing meaningful progress or a plan-changing discovery. Not blocking. | Read and acknowledge. No reply required unless you want to redirect. |
-
-**When a subagent asks:**
-
-```typescript
-// In the turn triggered by the incoming ask:
-intercom({ action: "reply", message: "Use exponential backoff, max 3 retries." })
-```
-
-**When a subagent sends an interview request:**
-
-Read the rendered questions in the incoming message and reply with the exact ids in JSON. `info` questions are context-only and do not need response entries:
-
-```typescript
-intercom({
-  action: "reply",
-  message: "```json\n{\n  \"responses\": [\n    { \"id\": \"api\", \"value\": \"Stable API\" },\n    { \"id\": \"constraints\", \"value\": \"Keep the public error shape unchanged.\" }\n  ]\n}\n```"
-})
-```
-
-**If you receive multiple pending asks from different subagents:**
-
-```typescript
-intercom({ action: "pending" })
-// → Shows all unresolved inbound asks with sender, elapsed time, and preview
-
-intercom({ action: "reply", to: "subagent-worker-78f659a3-1", message: "Use the v2 API." })
-```
-
-**Important:** Only sessions where `pi-subagents` supplied child bridge metadata
-get the `contact_supervisor` tool. Normal sessions use the regular `intercom`
-tool. If you see the formatted supervisor decision/progress update message, treat
-it as a `contact_supervisor` escalation. A subagent may use regular `intercom` for
-peer coordination, including peers in other directories, but owner decisions and
-new visible project panes should go through the supervisor.
-
 ## Key Differences
 
 | Action | Behavior | Use When |
@@ -288,7 +222,6 @@ new visible project panes should go through the supervisor.
 
 ## Visible Peer Sessions
 
-For bounded cross-codebase work, prefer `pi-subagents` with an explicit `cwd`.
 Use `intercom({ action: "send", cwd: "/path", openProjectPaneIfMissing: true, ... })`
 only when a long-lived visible peer session is useful.
 

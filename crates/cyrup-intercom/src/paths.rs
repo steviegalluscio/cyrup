@@ -61,7 +61,7 @@ pub const ENV_CODING_AGENT_DIR: &str = cyrup_config::paths::ENV_CODING_AGENT_DIR
 /// This tail used to be `<home>/.cyrup`, dropping pi's `/agent`. That was a port bug with a real
 /// consequence, not a cosmetic one: the extension itself never sees this function's result — the
 /// binary passes `ConfigDirs::agent_dir` (`<home>/.cyrup/agent`,
-/// `cyrup-config/src/env.rs:222-227`) into [`crate::extension::intercom_extension_for_env_concrete`]
+/// `cyrup-config/src/env.rs:222-227`) into [`crate::extension::intercom_extension_for_env`]
 /// — so the two spellings named two different directories. Intercom's state landed under
 /// `<home>/.cyrup/agent/intercom/` (where `extension-state/` actually is), while this ladder, the
 /// broker ([`crate::broker`]) and `cyrup-ext-subagents`' mirrored copy all looked under

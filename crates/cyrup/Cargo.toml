@@ -87,7 +87,6 @@ async-trait = { workspace = true }
 # The SubAgents extension (arch-SA): registered as a native built-in at all three session
 # construction sites below, plus this bin owns the internal `__subagent-runner --config <path>`
 # hop-2 subcommand (`subagent_runner_cmd.rs`) that calls straight into its `background::runner_main`.
-cyrup-ext-subagents = { workspace = true }
 cyrup-permission-system = { workspace = true }
 # The Intercom companion (out-of-band supervisor coordination): registered as a native built-in at
 # all three session construction sites below (child-mode gated), plus this bin owns the hidden

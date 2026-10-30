@@ -187,58 +187,6 @@ pub(crate) fn render_intercom_result(result: &Value, opts: &cyrup_ext::RenderOpt
     text
 }
 
-/// `renderCall` for `contact_supervisor` (`index.ts:2394-2411@v0.16.1`).
-pub(crate) fn render_contact_supervisor_call(args: &Value, expanded: bool) -> String {
-    // `typeof args.reason === "string" ? args.reason : "contact"`.
-    let reason = string_field(args, "reason").unwrap_or("contact");
-    let message_preview = call_message_text(args, expanded);
-    // `args.interview && typeof args.interview === "object"` — an ARRAY passes upstream's test too
-    // (`typeof [] === "object"`), but then `.title` is `undefined` and the branch is skipped, which
-    // is what reading `title` off a non-object here also produces.
-    let interview_title = args
-        .get("interview")
-        .and_then(|v| string_field(v, "title"))
-        .map(str::trim)
-        .filter(|t| !t.is_empty());
-
-    let mut text = format!("contact_supervisor {reason}");
-    if let Some(title) = interview_title {
-        text.push_str(&format!(" {title}"));
-    }
-    if let Some(preview) = message_preview {
-        text.push_str(&format!("\n  {preview}"));
-    }
-    text
-}
-
-/// `renderResult` for `contact_supervisor` (`v0.14.0 index.ts:2157-2175`).
-pub(crate) fn render_contact_supervisor_result(
-    result: &Value,
-    opts: &cyrup_ext::RenderOptions,
-) -> String {
-    if opts.is_partial {
-        return "Waiting for supervisor...".to_string();
-    }
-    let details = result.get("details").filter(|d| !d.is_null());
-    let failed = failed(details);
-    // `typeof details?.structuredReplyParseError === "string"` — presence of the KEY as a string,
-    // not its truthiness, so an empty-string parse error still warns.
-    let parse_warning = details
-        .and_then(|d| d.get("structuredReplyParseError"))
-        .and_then(Value::as_str);
-
-    let mut text = String::from(match (failed, parse_warning.is_some()) {
-        (true, _) => "✗ ",
-        (false, true) => "⚠ ",
-        (false, false) => "✓ ",
-    });
-    text.push_str(&first_text_content(result));
-    if let Some(err) = parse_warning {
-        text.push_str(&format!("\nStructured reply parse issue: {err}"));
-    }
-    text
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -345,7 +293,7 @@ mod tests {
 
     /// `intercom.integration.test.ts` "outgoing tool calls preserve full messages when expanded"
     /// (`d5a8fd1` #153, v0.16.1): the same leading-space, blank-line, CJK + emoji body, rendered
-    /// raw when expanded and as the 96-char normalized preview when collapsed, for BOTH tools.
+    /// raw when expanded and as the 96-char normalized preview when collapsed.
     #[test]
     fn outgoing_tool_calls_preserve_full_messages_when_expanded() {
         let message = format!("  {}\n\n    中文🧪 tail", "a".repeat(100));
@@ -354,11 +302,6 @@ mod tests {
                 render_intercom_call as fn(&Value, bool) -> String,
                 json!({ "action": "send", "to": "planner", "message": message }),
                 "intercom send → planner",
-            ),
-            (
-                render_contact_supervisor_call,
-                json!({ "reason": "progress_update", "message": message }),
-                "contact_supervisor progress_update",
             ),
         ];
         for (render, args, title) in cases {
@@ -385,10 +328,6 @@ mod tests {
             assert_eq!(
                 render_intercom_call(&json!({ "action": "send", "message": 42 }), expanded),
                 "intercom send"
-            );
-            assert_eq!(
-                render_contact_supervisor_call(&json!({ "message": ["x"] }), expanded),
-                "contact_supervisor contact"
             );
         }
         assert_eq!(
@@ -449,8 +388,7 @@ mod tests {
         );
     }
 
-    /// `isPartial` and `context.expanded` on the non-roster arms (`v0.14.0 index.ts:2724-2743`,
-    /// `:2157-2160`): the placeholders while a call runs, the message-id suffix only collapsed, and
+    /// `isPartial` and `context.expanded` on the non-roster arms (`v0.14.0 index.ts:2724-2743`): the placeholders while a call runs, the message-id suffix only collapsed, and
     /// the `Reason:` line only expanded.
     #[test]
     fn partial_and_expanded_options_select_upstreams_branches() {
@@ -458,10 +396,6 @@ mod tests {
         assert_eq!(
             render_intercom_result(&json!({}), &partial),
             "Intercom working..."
-        );
-        assert_eq!(
-            render_contact_supervisor_result(&json!({}), &partial),
-            "Waiting for supervisor..."
         );
         let undelivered = json!({
             "content": [{ "type": "text", "text": "not delivered" }],
@@ -507,45 +441,4 @@ mod tests {
         assert_eq!(bare, "✓ No unresolved inbound asks.");
     }
 
-    #[test]
-    fn contact_supervisor_renderers_port_the_reason_title_and_parse_warning() {
-        let call = render_contact_supervisor_call(
-            &json!({
-                "reason": "interview_request",
-                "interview": { "title": "  Pick a plan  " },
-                "message": "which one?",
-            }),
-            false,
-        );
-        assert_eq!(
-            call,
-            "contact_supervisor interview_request Pick a plan\n  which one?"
-        );
-        // Missing reason is upstream's "contact".
-        assert_eq!(
-            render_contact_supervisor_call(&json!({}), false),
-            "contact_supervisor contact"
-        );
-
-        let warn = render_contact_supervisor_result(
-            &json!({
-                "content": [{ "type": "text", "text": "**Reply from supervisor:**\nok" }],
-                "details": { "structuredReplyParseError": "missing field `choice`" },
-            }),
-            &collapsed(),
-        );
-        assert_eq!(
-            warn,
-            "⚠ Reply from supervisor:\nok\nStructured reply parse issue: missing field `choice`"
-        );
-        // A failure outranks the parse warning (upstream's ternary tests `failed` first).
-        let bad = render_contact_supervisor_result(
-            &json!({
-                "content": [{ "type": "text", "text": "nope" }],
-                "details": { "error": true, "structuredReplyParseError": "x" },
-            }),
-            &collapsed(),
-        );
-        assert!(bad.starts_with("✗ "), "got {bad}");
-    }
 }

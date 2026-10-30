@@ -29,27 +29,10 @@ pub fn intercom_broker() -> PathBuf {
     PathBuf::from(env!("CYRUP_IT_BIN_CYRUP_INTERCOM_BROKER"))
 }
 
-/// The real-broker-participant `cyrup`-child stand-in. Built only with `cyrup-intercom`'s
-/// `test-fixtures` feature; never shipped inside the real binary.
-pub fn intercom_child_fixture() -> PathBuf {
-    PathBuf::from(env!("CYRUP_IT_BIN_CYRUP_INTERCOM_CHILD_FIXTURE"))
-}
-
 /// The intercom scripting client (`crates/cyrup-intercom/src/bin/cyrup-intercom-cli.rs`, the port
 /// of pi-intercom's `cli.ts`).
 pub fn intercom_cli() -> PathBuf {
     PathBuf::from(env!("CYRUP_IT_BIN_CYRUP_INTERCOM_CLI"))
-}
-
-/// The scripted-NDJSON `cyrup`-shaped subagent double (arch-SA §11), driven by a JSON script named
-/// via `CYRUP_SUBAGENT_FIXTURE_SCRIPT`. This is the usual value for `CYRUP_SUBAGENT_BINARY`.
-pub fn subagent_fixture() -> PathBuf {
-    PathBuf::from(env!("CYRUP_IT_BIN_CYRUP_SUBAGENT_FIXTURE"))
-}
-
-/// The killable stand-in for "the orchestrator" (DI-SA-8 / R-SA-070/071).
-pub fn subagent_orchestrator_sim() -> PathBuf {
-    PathBuf::from(env!("CYRUP_IT_BIN_CYRUP_SUBAGENT_ORCHESTRATOR_SIM"))
 }
 
 /// The `wasm32-wasip2` guest component, built once by `build.rs` for the whole suite.

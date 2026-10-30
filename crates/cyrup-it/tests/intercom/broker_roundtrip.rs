@@ -1,8 +1,13 @@
 //! FULLY-WIRED PROOF (the port doc §5 Phase 2/§11.1): stand up the **real** broker as a genuine
-//! child OS process (the `cyrup-intercom-broker` fixture binary) and drive a child→broker→supervisor
-//! ask/answer round trip through **two real `IntercomClient`s over the real Unix socket** — not a
-//! mock. This is the child↔supervisor path the `contact_supervisor` tool + the seam channels ride
-//! on (the port doc §7.4).
+//! child OS process (the `cyrup-intercom-broker` fixture binary) and drive an ask/answer round trip
+//! between two sessions through **two real `IntercomClient`s over the real Unix socket** — not a
+//! mock (the port doc §7.4).
+//!
+//! [CYRUP-DELTA] docs/LEAN-FORK-PLAN.md step 4 deleted pi's subagents extension, and with it the
+//! third test that used to sit here — `delivery_channel_relays_a_grouped_result_to_the_supervisor…`,
+//! which drove the `DeliveryChannel` seam a subagent orchestrator used to hand its grouped run result
+//! to its parent. The seam itself is gone, so the proof went with it. What stays is the part that
+//! does not depend on a subagent: the broker's own message, reply-edge and mutual-ask behavior.
 
 #![allow(
     clippy::unwrap_used,
@@ -11,16 +16,9 @@
     clippy::panic
 )]
 
-use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::common::registration;
-use cyrup_ext_subagents::background::RunId;
-use cyrup_ext_subagents::tui::intercom::{DeliveryChannel, IntercomPayload, SubagentResultStatus};
-use cyrup_intercom::config::IntercomConfig;
-use cyrup_intercom::seams::IntercomDeliveryChannel;
-use cyrup_intercom::session_state::SharedIntercomState;
 use cyrup_intercom::transport::client::{InboundEvent, IntercomClient, SendOptions};
 use cyrup_intercom::transport::spawn::wait_for_broker;
 
@@ -143,87 +141,6 @@ async fn child_to_broker_to_supervisor_round_trip_over_the_real_socket() {
     // Clean teardown.
     child.disconnect();
     supervisor.disconnect();
-    let _ = broker.kill().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn delivery_channel_relays_a_grouped_result_to_the_supervisor_over_the_broker() {
-    // Exercises the REAL `IntercomDeliveryChannel` (the R-SA-123/124/125 seam impl) end-to-end over
-    // the broker: an orchestrator that is itself a child relays its allowlisted grouped result to its
-    // supervisor. Proves the delivery seam's broker-relay path (not just the degraded no-supervisor
-    // path unit-tested in-crate).
-    let broker_bin = crate::support::bins::intercom_broker();
-    let agent_dir = tempfile::tempdir().expect("tempdir");
-    let socket_path = agent_dir.path().join("intercom").join("broker.sock");
-
-    let mut broker = tokio::process::Command::new(&broker_bin)
-        .env("CYRUP_CODING_AGENT_DIR", agent_dir.path())
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .expect("spawn broker");
-    wait_for_broker(&socket_path, Duration::from_secs(5))
-        .await
-        .expect("broker up");
-
-    // The supervisor (the delivery target).
-    let supervisor = IntercomClient::connect(
-        &socket_path,
-        registration("supervisor"),
-        Some("supervisor-session".to_string()),
-    )
-    .await
-    .expect("supervisor registers");
-    let mut supervisor_events = supervisor.subscribe();
-
-    // The orchestrator's own client + shared state, with its supervisor target set.
-    let orchestrator = Arc::new(
-        IntercomClient::connect(
-            &socket_path,
-            registration("orchestrator"),
-            Some("orch-session".to_string()),
-        )
-        .await
-        .expect("orchestrator registers"),
-    );
-    let state = Arc::new(SharedIntercomState::new(
-        IntercomConfig::default(),
-        600_000,
-        PathBuf::from("/w"),
-    ));
-    state.set_client(Some(orchestrator.clone()));
-    let delivery = IntercomDeliveryChannel::new(state, Some("supervisor-session".to_string()));
-
-    let payload = IntercomPayload {
-        run_id: RunId::from_token("run00000000000042"),
-        agent: "researcher".to_string(),
-        success: true,
-        outputs: vec!["the grouped result output".to_string()],
-        total_tokens: 4242,
-        status: SubagentResultStatus::Completed,
-        summary: "1 completed".to_string(),
-        child_statuses: vec![SubagentResultStatus::Completed],
-    };
-    let delivered = delivery
-        .send(payload)
-        .await
-        .expect("delivery returns a verdict");
-    assert!(
-        delivered,
-        "the delivery channel relayed the result to the supervisor over the broker"
-    );
-
-    // The supervisor receives the allowlisted relay body.
-    let (from, message) = next_message(&mut supervisor_events).await;
-    assert_eq!(from.id, "orch-session");
-    assert!(message.content.text.contains("run00000000000042"));
-    assert!(message.content.text.contains("researcher"));
-    assert!(message.content.text.contains("Total tokens: 4242"));
-    assert!(message.content.text.contains("the grouped result output"));
-
-    supervisor.disconnect();
-    orchestrator.disconnect();
     let _ = broker.kill().await;
 }
 

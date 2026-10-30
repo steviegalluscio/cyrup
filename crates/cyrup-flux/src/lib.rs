@@ -48,12 +48,6 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::sync::Arc;
 
-/// The subagent-child signal, mirroring
-/// `cyrup_ext_subagents::spawn::nested_events::CHILD_ENV` (`nested_events.rs:35`). Declared
-/// locally rather than imported: this crate needs one `&str`, not a dependency on the
-/// workspace's largest crate.
-const SUBAGENT_CHILD_ENV: &str = "CYRUP_SUBAGENT_CHILD";
-
 /// Construct the flux extension.
 ///
 /// `agent_dir` is the binary's resolved agent directory (`ConfigDirs::agent_dir`, the same value
@@ -76,16 +70,20 @@ pub fn flux_extension_with_root(root: resources::BundledRoot) -> Arc<extension::
     })
 }
 
-/// `Some(flux_extension())` at the top level; `None` inside a subagent CHILD (a child re-execs
-/// this binary in Print/Json mode, and contributing 15 templates plus a skill to every child
-/// would put the skill into every child's system prompt for a pipeline the child is not
-/// running).
+/// [`flux_extension`] with the bundled root taken from the process environment.
+///
+/// [CYRUP-DELTA] upstream returns `None` inside a subagent CHILD — a child re-execs this binary in
+/// Print/Json mode, and 15 templates plus a skill in every child's system prompt is noise for a
+/// pipeline the child is not running. There is no child mode here: the marker (`CYRUP_SUBAGENT_CHILD`)
+/// was set only by the subagents extension, which this fork deletes in step 4 of
+/// `docs/LEAN-FORK-PLAN.md`. The `Option` and the injected-environment seam stay, since the bundled
+/// root still resolves through the environment.
 #[must_use]
 pub fn flux_extension_for_env(agent_dir: &Path) -> Option<Arc<extension::FluxExtension>> {
     flux_extension_for_env_from(agent_dir, &|key| std::env::var_os(key))
 }
 
-/// [`flux_extension_for_env`] with the environment supplied — the child gate as a pure rule, the
+/// [`flux_extension_for_env`] with the environment supplied — root resolution as a pure rule, the
 /// same closure-shaped seam as [`resources::BundledRoot::resolve_from`] (which the bundled root is
 /// resolved through here too), so a test pins the `None` branch without `set_var` (unsafe in
 /// edition 2024; this crate forbids `unsafe`).
@@ -94,9 +92,6 @@ pub fn flux_extension_for_env_from(
     agent_dir: &Path,
     env: &dyn Fn(&str) -> Option<OsString>,
 ) -> Option<Arc<extension::FluxExtension>> {
-    if env(SUBAGENT_CHILD_ENV).is_some_and(|v| v == "1") {
-        return None;
-    }
     Some(flux_extension_with_root(
         resources::BundledRoot::resolve_from(agent_dir, env),
     ))

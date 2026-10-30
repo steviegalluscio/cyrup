@@ -60,17 +60,14 @@ In a trusted project the layers apply in full, under the `deny` floor above. Ups
 `pi-permission-system` has no such rule: its project layer can turn an `ask` into an `allow` in any
 project.
 
-The two "agent" layers apply only when a call runs under a named agent persona — see
-[Subagents](subagents.md).
+The two "agent" layers apply only when a call runs under a named agent persona, and the persona name
+reaches the gate through `CYRUP_SUBAGENT_AGENT_NAME`. cyrup no longer spawns child sessions, so
+nothing sets that variable for you: in this fork those layers arm only for a launcher (an SDK host, a
+wrapper script) that exports the name itself.
 
-**Those two layers read a different directory from the one subagents reads.** The permission system
-looks for `<name>.md` under `~/.cyrup/agent/agents/` and `<project>/.cyrup/agent/agents/` — the
-singular `agent` directory. Subagents discovers its personas under `~/.cyrup/agents`, `~/.agents`,
-`<project>/.agents` and `<project>/.cyrup/agents` — no `agent` segment. The two sets do not overlap,
-so a `permission:` block in the persona file subagents actually runs is **not** picked up as a policy
-layer; to have it enforced you need a file of the same name under the permission system's `agents/`
-directory as well. The arming rule above reads the same permission-system directory, so a populated
-subagents home does not arm the extension either.
+**Where those files live.** The permission system looks for `<name>.md` under `~/.cyrup/agent/agents/`
+and `<project>/.cyrup/agent/agents/` — the singular `agent` directory. The arming rule above reads
+that same directory, so an empty `agents/` directory does not arm the extension on its own.
 
 ## Writing a policy
 
@@ -210,9 +207,11 @@ interactive UI — has nobody to ask, so an `ask` becomes a block. Policies you 
 exception: the dialog goes to the client as an `extension_ui_request` and the client's
 `extension_ui_response` decides.
 
-When the call comes from a subagent child, which has no human of its own, the child's `ask` is
-forwarded up to the session that started it through a filesystem spool, and you answer it there. That
-needs a session with a UI. A session without one (`-p`, `--mode json`) leaves a `no-ui` marker in its
+When the call comes from a child session — a `cyrup` process launched with
+`CYRUP_SUBAGENT_PARENT_SESSION` naming its parent, which is how a spawned session addresses the one
+that started it — the child has no human of its own, so its `ask` is forwarded up to the parent
+through a filesystem spool and you answer it there. That needs a session with a UI. (cyrup itself no
+longer spawns those children; the forwarding path stays for a launcher that does.) A session without one (`-p`, `--mode json`) leaves a `no-ui` marker in its
 spool, and a child whose `ask` fires reads it and refuses the call at once, with the same text a
 headless session gives (`... requires approval, but no interactive UI is available`), instead of
 waiting. The marker names the process that wrote it, so it holds only while that process is running:

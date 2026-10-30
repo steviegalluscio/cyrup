@@ -57,7 +57,7 @@ async fn parent_role_publishes_and_clears_the_process_parent_session_anchor() {
     ext.set_host_services(Arc::new(AnchorHost("session-root-perm001")));
     let ctx = event_ctx(dir.path().to_path_buf());
 
-    cyrup_ext_subagents::clear_parent_session_anchor();
+    crate::primitives::clear_parent_session_anchor();
     let _ = ext
         .on_event(
             &HostEvent::SessionStart {
@@ -68,7 +68,7 @@ async fn parent_role_publishes_and_clears_the_process_parent_session_anchor() {
         )
         .await;
     assert_eq!(
-        cyrup_ext_subagents::background::parent_anchor::published_parent_session_anchor()
+        crate::primitives::published_parent_session_anchor()
             .as_deref(),
         Some("session-root-perm001"),
         "a PARENT-role SessionStart must publish the live session id as the spawn anchor"
@@ -84,7 +84,7 @@ async fn parent_role_publishes_and_clears_the_process_parent_session_anchor() {
         )
         .await;
     assert_eq!(
-        cyrup_ext_subagents::background::parent_anchor::published_parent_session_anchor(),
+        crate::primitives::published_parent_session_anchor(),
         None,
         "SessionShutdown must clear the anchor (pi's `delete process.env[...]`)"
     );
@@ -130,7 +130,7 @@ async fn a_subagent_child_never_publishes_or_clears_the_parent_session_anchor() 
     child.set_host_services(Arc::new(AnchorHost("nested-orchestrator-own-id")));
     let ctx = event_ctx(dir.path().to_path_buf());
 
-    cyrup_ext_subagents::clear_parent_session_anchor();
+    crate::primitives::clear_parent_session_anchor();
     let _ = child
         .on_event(
             &HostEvent::SessionStart {
@@ -141,7 +141,7 @@ async fn a_subagent_child_never_publishes_or_clears_the_parent_session_anchor() 
         )
         .await;
     assert_eq!(
-        cyrup_ext_subagents::background::parent_anchor::published_parent_session_anchor(),
+        crate::primitives::published_parent_session_anchor(),
         None,
         "a CHILD-role SessionStart must NOT publish its own id (pi's \
          `if (!process.env[SUBAGENT_CHILD_ENV])` guard, `index.ts:596`) — publishing here is \
@@ -151,7 +151,7 @@ async fn a_subagent_child_never_publishes_or_clears_the_parent_session_anchor() 
     // The consequence that makes the reorder safe, asserted directly rather than inferred: with
     // nothing published, the inherited ROOT anchor is what a spawn from this process resolves.
     assert_eq!(
-        cyrup_ext_subagents::background::parent_anchor::resolve_parent_session_anchor_from(Some(
+        crate::primitives::resolve_parent_session_anchor_from(Some(
             "root-session-anchor".to_string()
         )),
         Some("root-session-anchor".to_string()),
@@ -163,7 +163,7 @@ async fn a_subagent_child_never_publishes_or_clears_the_parent_session_anchor() 
     // The mirror gate (`SessionShutdown`): a child never published, so it must never CLEAR
     // either — otherwise a child sharing a process with a parent-role session would wipe the
     // anchor out from under it.
-    cyrup_ext_subagents::publish_parent_session_anchor("root-session-anchor");
+    crate::primitives::publish_parent_session_anchor("root-session-anchor");
     let _ = child
         .on_event(
             &HostEvent::SessionShutdown {
@@ -174,14 +174,14 @@ async fn a_subagent_child_never_publishes_or_clears_the_parent_session_anchor() 
         )
         .await;
     assert_eq!(
-        cyrup_ext_subagents::background::parent_anchor::published_parent_session_anchor()
+        crate::primitives::published_parent_session_anchor()
             .as_deref(),
         Some("root-session-anchor"),
         "a CHILD-role SessionShutdown must leave a published anchor alone (it never published \
          one), or it would clear an anchor that is not its to clear"
     );
 
-    cyrup_ext_subagents::clear_parent_session_anchor();
+    crate::primitives::clear_parent_session_anchor();
 }
 
 // ============================================================================================

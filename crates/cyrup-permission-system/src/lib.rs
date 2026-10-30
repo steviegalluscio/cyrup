@@ -100,6 +100,7 @@ pub mod jsonc;
 pub mod logging;
 pub mod manager;
 pub mod ordered;
+pub mod primitives;
 pub mod restrictiveness;
 pub mod runtime_api;
 pub mod sanitize;

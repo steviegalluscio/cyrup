@@ -26,14 +26,15 @@ workspace = true
 cyrup-core = { workspace = true }
 cyrup-ext = { workspace = true }
 # P-5 (port doc §4 / reconciliation §2): the child→parent ask-forwarding spool (`forwarding.rs`)
-# consumes the `cyrup-ext-subagents::background::control` file-channel primitives as BUILDING BLOCKS —
-# `validate_safe_token`/`validate_contains_root` (safe path-token guard before any `Path::join`),
-# `CONTROL_INBOX_POLL_INTERVAL` (the poll cadence) — AND the R-SA-P1 parent-session anchor const
-# `PARENT_SESSION_ENV_VAR` (`CYRUP_SUBAGENT_PARENT_SESSION`), the routing key a child reads to address
-# its parent's inbox. The spool MECHANISM itself (nonce-bound request/response message shapes, the
-# `wx`/0o600 atomic write, the 0o700 session dirs, the directory layout) is pi's OWN, replicated here
-# (`permission-forwarding.ts` + `index.ts:1030-1504`), NOT the subagents interrupt channel.
-cyrup-ext-subagents = { workspace = true }
+# consumes file-channel primitives as BUILDING BLOCKS — `validate_safe_token`/`validate_contains_root`
+# (safe path-token guard before any `Path::join`), `CONTROL_INBOX_POLL_INTERVAL` (the poll cadence) —
+# AND the R-SA-P1 parent-session anchor const `PARENT_SESSION_ENV_VAR`
+# (`CYRUP_SUBAGENT_PARENT_SESSION`), the routing key a child reads to address its parent's inbox.
+# Those used to come from `cyrup-ext-subagents`; step 4 of docs/LEAN-FORK-PLAN.md deletes that crate,
+# so they are now this crate's own `src/primitives/` module. The spool MECHANISM itself (nonce-bound
+# request/response message shapes, the `wx`/0o600 atomic write, the 0o700 session dirs, the directory
+# layout) is pi's OWN, replicated here (`permission-forwarding.ts` + `index.ts:1030-1504`), NOT the
+# subagents interrupt channel.
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -75,6 +76,13 @@ time = { workspace = true }
 # parse is synchronous — pi's async WASM warm-up (`parser.ts:62-78`) has no analogue here.
 tree-sitter = "0.25"
 tree-sitter-bash = "0.25.1"
+# `primitives/liveness.rs`'s zero-signal probe — `kill(pid, 0)`, which sends no signal and only
+# asks the kernel about existence/permission (R-SA-089). Safe wrapper over `libc::kill`, so this
+# crate's `#![forbid(unsafe_code)]` is unaffected.
+nix = { workspace = true, features = ["signal", "process"] }
+# `primitives/session_lease.rs`'s off-Linux start-identity probe (`start:<secs>`), the PERM-045(b)
+# rung for platforms with no `/proc/<pid>/stat` to read.
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 
 [dev-dependencies]
 # NOTE (2026-08): the four integration binaries this section used to name — `tests/gate_integration.rs`,

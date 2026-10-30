@@ -117,7 +117,6 @@ async fn a_claiming_extension_sets_the_intercom_id_over_the_stable_id() {
             agent_dir.clone(),
             cwd.clone(),
             load_config(&intercom_dir).expect("config loads"),
-            None,
         )
         .expect("build the intercom extension"),
     );
@@ -245,7 +244,6 @@ async fn the_first_non_blank_claim_wins_and_does_not_outlive_its_runtime() {
             agent_dir.path().to_path_buf(),
             PathBuf::from("/tmp/work"),
             load_config(&intercom_dir).expect("config loads"),
-            None,
         )
         .expect("build the extension"),
     );

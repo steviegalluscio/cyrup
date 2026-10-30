@@ -965,7 +965,7 @@ pub fn build_inline_message_for(
 /// a pi spelling, because a relayed message here can only have come from another cyrup. Remote
 /// discovery admits Herdr agents by kind on both sides: pi's only `"pi"`
 /// (`tmp/pi-intercom/cross-machine-discovery.ts:62@v0.16.1`, `row.agent !== "pi"`) and cyrup's only
-/// `"cyrup"` ([`cyrup_ext_subagents::herdr::AGENT`], `cross_machine/discovery.rs:234-237`). So pi's
+/// `"cyrup"` (`cyrup_ext_subagents::herdr::AGENT`, `cross_machine/discovery.rs:234-237`). So pi's
 /// send path never resolves a cyrup session as a target, and this send-back resolves only through
 /// cyrup's discovery, which finds the sender because it is a cyrup agent. Cross-machine relay is
 /// cyrup↔cyrup; there is no pi sender this hint would need to address.
@@ -1398,7 +1398,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let params = || crate::connect::ConnectParams {
             agent_dir: dir.path().join("agent"),
-            metadata: None,
             model: None,
         };
         let s = Arc::new(state(true));
@@ -1836,7 +1835,6 @@ mod tests {
     fn runtime_params(dir: &std::path::Path) -> crate::connect::ConnectParams {
         crate::connect::ConnectParams {
             agent_dir: dir.join("agent"),
-            metadata: None,
             model: None,
         }
     }
@@ -2117,7 +2115,6 @@ mod tests {
             &s,
             crate::connect::ConnectParams {
                 agent_dir: dir.path().join("agent"),
-                metadata: None,
                 model: None,
             },
         );
@@ -2175,7 +2172,6 @@ mod tests {
         s.set_has_ui(true);
         let params = || crate::connect::ConnectParams {
             agent_dir: dir.path().join("agent"),
-            metadata: None,
             model: None,
         };
         crate::connect::begin_runtime(&s, params());
@@ -2243,7 +2239,6 @@ mod tests {
             &s,
             crate::connect::ConnectParams {
                 agent_dir: dir.path().join("agent"),
-                metadata: None,
                 model: None,
             },
         );
@@ -2353,7 +2348,6 @@ mod tests {
             &steer,
             crate::connect::ConnectParams {
                 agent_dir: dir.path().join("agent2"),
-                metadata: None,
                 model: None,
             },
         );
@@ -2491,7 +2485,6 @@ mod tests {
                 &s,
                 crate::connect::ConnectParams {
                     agent_dir: dir.path().join("agent"),
-                    metadata: None,
                     model: None,
                 },
             );
@@ -2708,7 +2701,6 @@ mod tests {
                 &s,
                 crate::connect::ConnectParams {
                     agent_dir: dir.path().join("agent"),
-                    metadata: None,
                     model: None,
                 },
             );

@@ -24,7 +24,6 @@
 
 - [How extensions work](extensions/overview.md)
 - [Installing extensions](extensions/managing.md)
-- [Subagents](extensions/subagents.md)
 - [The permission system](extensions/permissions.md)
 - [Intercom](extensions/intercom.md)
 - [Flux: the structured pipeline](extensions/flux.md)

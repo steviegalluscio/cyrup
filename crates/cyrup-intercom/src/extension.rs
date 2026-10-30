@@ -2,8 +2,9 @@
 //! [`intercom_extension_for_env`] (a port of `pi-intercom/index.ts:430` `piIntercomExtension(pi)`).
 //!
 //! WIRING (all reachable in this phase, no dead primitives):
-//! - `init` registers the `intercom` tool always, and `contact_supervisor` ONLY when child-
-//!   orchestrator metadata is present (`index.ts:1162-1163`); it subscribes the lifecycle events.
+//! - `init` registers the `intercom` tool and subscribes the lifecycle events. (pi's second
+//!   registration — `contact_supervisor`, for a subagent child with orchestrator metadata,
+//!   `index.ts:1162-1163` — went with the subagents extension, docs/LEAN-FORK-PLAN.md step 4.)
 //! - `init` also registers the four slash commands — `/intercom`, `/intercom-id`, `/alias` and
 //!   `/handover` (`v0.16.1 index.ts:3223-3241`), dispatched by
 //!   [`IntercomExtension::execute_command`] — and the `alt+m` shortcut (`:3243-3246`), dispatched by
@@ -14,20 +15,16 @@
 //!   waiter match + `ReplyTracker` record, `index.ts:709-764`).
 //! - `on_event(SessionShutdown)` disconnects; the agent/tool lifecycle events drive presence
 //!   (`index.ts:562-621`).
-//! - [`intercom_extension_for_env`] is called at the three `crates/cyrup/src/main.rs` session-build
-//!   sites, child-mode gated (a subagent child with metadata always attaches so `contact_supervisor`
-//!   registers; a plain session attaches only when opt-in-installed).
+//! - [`intercom_extension_for_env`] is called at the `crates/cyrup/src/session_launch.rs`
+//!   session-build sites and attaches when intercom is installed (the opt-in flag or a config file).
 //!
-//! CHANNEL HANDOFF (WIRED): the three seam channels ([`IntercomExtension::clarify_channel`]/
-//! [`IntercomExtension::delivery_channel`]/[`IntercomExtension::steer_channel`]) are handed into
-//! `SubagentsExtension::with_channels` at the three `crates/cyrup/src/main.rs` session-build sites,
-//! replacing subagents' `NoTransportChannel`/no-live-`AskLock`/`NoTransportSteerChannel` degrade
-//! defaults with these broker-backed impls — see [`crate::seams`].
-//!
-//! LOCAL SURFACE (WIRED): a top-level orchestrator (no supervisor to relay to) surfaces a delivered
-//! subagent result LOCALLY through the live `HostServices` — `append_entry` + an `inject_message`
-//! trigger-turn (`deliverLocalSubagentRelayMessage`, `index.ts:889-910`), see the
-//! `IntercomDeliveryChannel::send` no-supervisor branch in [`crate::seams`].
+//! [CYRUP-DELTA] docs/LEAN-FORK-PLAN.md step 4 deletes pi's subagents extension, and with it the
+//! child-facing half of this extension: the broker-backed seam channels that lived in `src/seams.rs`
+//! (pi consumed them as `ClarifyChannel`/`DeliveryChannel`/`SteerChannel`), the local surfacing of a
+//! delivered subagent result (`deliverLocalSubagentRelayMessage`, `index.ts:889-910`), the
+//! `contact_supervisor` tool, and the child-mode force-attach that made every spawned child carry
+//! intercom whether or not the user installed it. Peer-to-peer messaging, the broker, the human
+//! surfaces (overlay, compose, handover, inbound cards) and the `intercom` tool are untouched.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -39,17 +36,10 @@ use cyrup_ext::{
     EventKind, ExtError, ExtMode, HookOutcome, HostCtx, HostEvent, HostServices, InitApi,
     NativeExtension, NotifyKind,
 };
-use cyrup_ext_subagents::tui::intercom::{ClarifyChannel, DeliveryChannel, SteerChannel};
-
 use crate::config::{IntercomConfig, ask_timeout_ms, config_path, load_config};
 use crate::connect::{self, ConnectParams};
-use crate::identity::{
-    ChildOrchestratorMetadata, preferred_supervisor_target, read_child_orchestrator_metadata,
-};
 use crate::paths::{agent_dir_path, intercom_dir_path};
-use crate::seams::{IntercomClarifyChannel, IntercomDeliveryChannel, IntercomSteerChannel};
 use crate::session_state::SharedIntercomState;
-use crate::tools::contact_supervisor::ContactSupervisorTool;
 use crate::tools::intercom::{HandoverRoute, IntercomTool, build_handover_text, deliver_handover};
 use crate::transport::client::IntercomClient;
 use crate::transport::protocol::{SessionInfo, now_ms};
@@ -125,7 +115,7 @@ fn is_project_path(target: &str) -> bool {
 
 /// The extension's fixed id.
 pub const EXTENSION_ID: &str = "cyrup-intercom";
-/// The explicit opt-in flag: set truthy to attach intercom to a plain (non-child) session.
+/// The explicit opt-in flag: set truthy to attach intercom to a session.
 pub const INSTALL_ENV_VAR: &str = "CYRUP_INTERCOM";
 
 /// The intercom native extension.
@@ -133,43 +123,23 @@ pub struct IntercomExtension {
     id: ExtensionId,
     state: Arc<SharedIntercomState>,
     agent_dir: PathBuf,
-    metadata: Option<ChildOrchestratorMetadata>,
-    /// `nativeSupervisorChannelAvailable` (`v0.10.1 index.ts:1504`), probed ONCE at construction the
-    /// way [`read_child_orchestrator_metadata`] is, never re-read inside `init`.
-    native_supervisor_channel: bool,
     /// Whether intercom is genuinely INSTALLED (`CYRUP_INTERCOM`, or an
-    /// `<agent_dir>/intercom/config.json`), as opposed to this extension having attached only
-    /// through the child-metadata escape hatch in [`intercom_extension_for_env_concrete`], where
-    /// `metadata.is_some()` short-circuits the install gate.
+    /// `<agent_dir>/intercom/config.json`). Probed ONCE at construction, never re-read inside `init`.
     ///
-    /// Used together with [`Self::native_supervisor_channel`] to decide who owns the bare tool
-    /// name `intercom` — see [`Self::init`] for the full argument. Probed ONCE at construction,
-    /// never re-read inside `init`, exactly as `native_supervisor_channel` above.
-    ///
-    /// ⚠ "This extension stands down" is NOT the same claim as "the other side stands up". The
-    /// subagents crate's native fallback needs BOTH `!intercom_available` AND `intercom` present in
-    /// `required_child_tools`; ownership here is decided against
-    /// [`Self::native_supervisor_channel`] alone, which is the term that governs whether that side
-    /// can register AT ALL. [`Self::init`] spells out the one state where both stand down, and why
-    /// that is intended.
-    ///
-    /// Both sides read the install marker at `<agent_dir>/intercom/config.json` over the SAME
-    /// agent-dir ladder — `cyrup_config::paths::cyrup_agent_dir_from`, i.e. `<home>/.cyrup/agent`.
-    /// That agreement is load-bearing and was once broken; see
+    /// Both sides of the old install handshake read the marker at `<agent_dir>/intercom/config.json`
+    /// over the SAME agent-dir ladder — `cyrup_config::paths::cyrup_agent_dir_from`, i.e.
+    /// `<home>/.cyrup/agent`. That agreement is load-bearing and was once broken; see
     /// [`crate::paths::agent_dir_path_from`]'s "Why the `/agent` component is load-bearing".
     ///
-    /// Scope note: this pair governs the `intercom` name only. The separate `contact_supervisor`
-    /// gap — installed + native channel leaves that tool registered by neither provider — is NOT
-    /// addressed here and is not made worse; closing it needs a broker-vs-native routing decision
-    /// of its own.
+    /// [CYRUP-DELTA] This field used to be read against `nativeSupervisorChannelAvailable` and the
+    /// child-metadata escape hatch, because two providers could claim the bare `intercom` tool name
+    /// for a spawned subagent child. Step 4 of docs/LEAN-FORK-PLAN.md deletes that crate, so there is
+    /// one provider again and this gates only whether the extension attaches at all.
     installed: bool,
-    clarify: Arc<IntercomClarifyChannel>,
-    delivery: Arc<IntercomDeliveryChannel>,
-    steer: Arc<IntercomSteerChannel>,
 }
 
 impl IntercomExtension {
-    /// Build the extension over a resolved config + optional child metadata + this session's cwd.
+    /// Build the extension over a resolved config + this session's cwd.
     ///
     /// # Errors
     /// pi `getAskTimeoutMs` throws (uncaught) when `PI_INTERCOM_ASK_TIMEOUT_MS`/
@@ -181,44 +151,19 @@ impl IntercomExtension {
         agent_dir: PathBuf,
         cwd: PathBuf,
         config: IntercomConfig,
-        metadata: Option<ChildOrchestratorMetadata>,
     ) -> Result<Self, String> {
         let ask_timeout = ask_timeout_ms()?;
         let state = Arc::new(SharedIntercomState::new(config, ask_timeout, cwd));
-        // Publish the metadata so `SharedIntercomState::sync_presence_identity` (reachable from the
-        // `intercom` tool, `v0.10.1 index.ts:1853`) derives the SAME presence name
-        // `connect::build_registration` does.
-        state.set_presence_metadata(metadata.clone());
-        let supervisor_target = metadata.as_ref().map(preferred_supervisor_target);
-        let clarify = Arc::new(IntercomClarifyChannel::new(state.clone()));
-        let delivery = Arc::new(IntercomDeliveryChannel::new(
-            state.clone(),
-            supervisor_target,
-        ));
-        let steer = Arc::new(IntercomSteerChannel::new(state.clone()));
         Ok(Self {
             id: ExtensionId::from(EXTENSION_ID),
             state,
             agent_dir,
-            metadata,
-            native_supervisor_channel: crate::identity::native_supervisor_channel_available(),
             // "This attachment owns the name" — what every caller that did not reach the
             // force-attach path means. `intercom_extension_for_env_concrete`, the ONE production
             // constructor and the only one that has already probed the install state, overrides it
             // via [`Self::with_installed`].
             installed: true,
-            clarify,
-            delivery,
-            steer,
         })
-    }
-
-    /// Override the `nativeSupervisorChannelAvailable` probe (`v0.10.1 index.ts:1504`) instead of
-    /// reading the process environment — for tests, which must not mutate process-global env state.
-    #[must_use]
-    pub fn with_native_supervisor_channel(mut self, available: bool) -> Self {
-        self.native_supervisor_channel = available;
-        self
     }
 
     /// Override the install probe instead of reading the process environment — for
@@ -228,33 +173,6 @@ impl IntercomExtension {
     pub fn with_installed(mut self, installed: bool) -> Self {
         self.installed = installed;
         self
-    }
-
-    /// The broker-backed [`ClarifyChannel`] this extension owns. HANDED (WIRED) into
-    /// `SubagentsExtension::with_channels(.., clarify)` at the `main.rs` sites (the port doc §8.4
-    /// item 1); the exec detach-trigger arm fires it on a child's blocking ask. See [`crate::seams`].
-    #[must_use]
-    pub fn clarify_channel(&self) -> Arc<dyn ClarifyChannel> {
-        self.clarify.clone()
-    }
-
-    /// The broker-backed [`DeliveryChannel`] this extension owns. HANDED (WIRED) into
-    /// `SubagentsExtension::with_channels(.., delivery)` at the `main.rs` sites (the port doc §8.4
-    /// item 1); the run driver's `deliver_group_out_of_band` invokes it. See [`crate::seams`].
-    #[must_use]
-    pub fn delivery_channel(&self) -> Arc<dyn DeliveryChannel> {
-        self.delivery.clone()
-    }
-
-    /// The broker-backed [`SteerChannel`] this extension owns. HANDED (WIRED) into
-    /// `SubagentsExtension::with_channels(.., steer)` at the `main.rs` sites; the subagents
-    /// `control_resume` `SteerRunning` arm fires it to DELIVER `action='resume'`'s follow-up to a
-    /// still-running async child's registered bridge target over the broker (R-SA-086, pi
-    /// `subagent-executor.ts:860-878`). Backed by the SAME `SharedIntercomState` broker client the
-    /// delivery/clarify channels use. See [`crate::seams::IntercomSteerChannel`].
-    #[must_use]
-    pub fn steer_channel(&self) -> Arc<dyn SteerChannel> {
-        self.steer.clone()
     }
 
     /// The shared session state (exposed for tests + a future P4/P5 consumer).
@@ -270,7 +188,6 @@ impl IntercomExtension {
     fn connect_params(&self, model: Option<&str>) -> ConnectParams {
         ConnectParams {
             agent_dir: self.agent_dir.clone(),
-            metadata: self.metadata.clone(),
             model: model.map(str::to_string),
         }
     }
@@ -1186,60 +1103,14 @@ impl NativeExtension for IntercomExtension {
     }
 
     async fn init(&self, api: &mut InitApi) -> Result<(), ExtError> {
-        // `contact_supervisor` only for a subagent child with orchestrator metadata
-        // (index.ts:1162-1163,1425).
-        //
-        // Upstream registers `intercom` UNCONDITIONALLY (`pi-intercom index.ts:2088`) and is right
-        // to: there an uninstalled intercom is an ABSENT npm package, so nothing else can claim the
-        // name. cyrup diverges by force-attaching this extension for any bridged child even with no
-        // install (`intercom_extension_for_env_concrete`), so an unconditional registration can
-        // DUPLICATE the subagents crate's `NativeChildIntercomTool` — and a duplicate tool name is
-        // a hard extension-load failure that stops the child booting at all.
-        //
-        // Stand down ONLY when BOTH hold: we are here purely by force-attach (`!installed`) AND the
-        // native provider is present and functional (`native_supervisor_channel`, i.e.
-        // `CYRUP_SUBAGENT_SUPERVISOR_CHANNEL_DIR` is set). That var is exactly what the native
-        // fallback's own metadata requires (every lookup there is `?`-terminated), and it is the
-        // root of its request/reply channel — so when it is ABSENT the native side registers
-        // nothing at all and this extension is the only possible provider.
-        //
-        // The CONVERSE does not hold, and the asymmetry matters: a channel dir being PRESENT does
-        // not guarantee the native side claims the name. Its gate has a SECOND term — `intercom`
-        // must appear in `required_child_tools` (`native_supervisor.rs`'s
-        // `native_child_intercom_fallback_should_register`) — and upstream's
-        // `legacySupervisorPairing` filter DROPS `intercom` from that list when the persona also
-        // declares `contact_supervisor` (`exec/tool_surface.rs`'s `required_child_tools`). So for
-        // such a persona, with no install, NEITHER side registers `intercom`.
-        //
-        // That is intended, not a hole to plug here: the child still gets `contact_supervisor` from
-        // the native side (whose own gate does NOT read `required_child_tools`), and it matches
-        // upstream, where an uninstalled intercom is an absent package and the paired alias is
-        // explicitly legacy plumbing rather than a requirement (pi #1207). Widening this guard to
-        // cover it would re-introduce the duplicate in exactly the case upstream removed the name
-        // for, and would drag this crate into reading `required_child_tools`.
-        //
-        // ⚠ Gating on `!installed` ALONE is a real, measured defect, not a hypothetical: a
-        // BACKGROUND child is bridged (so this extension attaches) but has no channel dir, because
-        // the detached runner resolves its parent-session anchor independently of the orchestrator
-        // target it was handed. Standing down there leaves ZERO providers for a name the persona
-        // REQUIRES, and the child refuses to start with "requested unavailable child tools:
-        // intercom".
-        if self.installed || !self.native_supervisor_channel {
-            api.register_tool(Arc::new(IntercomTool::new(self.state.clone())));
-        }
-        // `v0.10.1 index.ts:1505-1507`:
-        //   `if (childOrchestratorMetadata && !nativeSupervisorChannelAvailable) { pi.registerTool(…) }`
-        // A child launched through the NATIVE supervisor channel must not also be handed the legacy
-        // broker-routed tool: the model picks one, so the same decision can be requested through two
-        // mechanisms while the parent polls only one of them.
-        if let Some(metadata) = &self.metadata
-            && !self.native_supervisor_channel
-        {
-            api.register_tool(Arc::new(ContactSupervisorTool::new(
-                self.state.clone(),
-                metadata.clone(),
-            )));
-        }
+        // pi registers `intercom` UNCONDITIONALLY (`pi-intercom index.ts:2088`), and cyrup now does
+        // the same. cyrup had diverged: it force-attached this extension for a bridged SUBAGENT CHILD
+        // even with no install, and an unconditional registration could then DUPLICATE the subagents
+        // crate's `NativeChildIntercomTool` — a duplicate tool name is a hard extension-load failure
+        // that stops the child booting. Step 4 of docs/LEAN-FORK-PLAN.md deletes that crate and the
+        // force-attach with it, so the divergence has no case left to fire in and `installed` gates
+        // only whether the extension attaches at all (see [`Self::installed`]).
+        api.register_tool(Arc::new(IntercomTool::new(self.state.clone())));
         // ICOM-028: claim the durable inbound-message entry so [`Self::render_entry`] is reached.
         // Without this registration the TUI's `has_entry_renderer` check short-circuits
         // (`cyrup-tui/src/app.rs:5845`) and the card `surface_incoming_message` pre-renders is
@@ -1363,8 +1234,9 @@ impl NativeExtension for IntercomExtension {
 
     /// Late-bind the live `HostServices` backend (P-1 Route B, the port doc §4.1). The builder calls
     /// this via `load_native_with_services` (facade.rs:181) BEFORE `init`; stash the shared `Arc` so
-    /// the inbound surface ([`crate::inbound::surface_incoming_message`]) and the ClarifyChannel human
-    /// answer ([`crate::seams::IntercomClarifyChannel::ask`]) reach `append_entry`/`input` from their
+    /// the inbound surface ([`crate::inbound::surface_incoming_message`]) and a ClarifyChannel human
+    /// answer (the old `seams::IntercomClarifyChannel::ask`, deleted with the subagents bridge) reach
+    /// `append_entry`/`input` from their
     /// background tasks OUTSIDE any `HostCtx`. Idempotent (a session rebuild rebinds the same Arc).
     fn set_host_services(&self, services: Arc<dyn HostServices>) {
         self.state.set_host_services(services);
@@ -1594,7 +1466,7 @@ impl NativeExtension for IntercomExtension {
                         .get("id")
                         .and_then(serde_json::Value::as_str)
                         .map(str::to_string);
-                    let identity = connect::presence_identity(&self.state, self.metadata.as_ref());
+                    let identity = connect::presence_identity(&self.state);
                     let ctx_usage = self.state.current_context_usage();
                     client.update_presence_full(
                         identity.name.clone(),
@@ -1667,10 +1539,11 @@ impl NativeExtension for IntercomExtension {
         }
     }
 
-    /// `renderCall` for both tools (`v0.10.1 index.ts:2298-2315` and `:1743-1756`). Until this
-    /// landed, neither intercom tool registered a renderer at all, so every `intercom` /
-    /// `contact_supervisor` row in the transcript fell back to the host's generic tool rendering —
-    /// upstream draws an action-coloured header with the target and a message preview.
+    /// `renderCall` (`v0.10.1 index.ts:2298-2315` and, for `contact_supervisor`, `:1743-1756`). Until
+    /// this landed the intercom tools registered no renderer at all, so every `intercom` row in the
+    /// transcript fell back to the host's generic tool rendering — upstream draws an action-coloured
+    /// header with the target and a message preview. (`contact_supervisor`'s half went with pi's
+    /// subagents extension, docs/LEAN-FORK-PLAN.md step 4.)
     ///
     /// The options-free form of [`Self::render_call_under`], under the default (collapsed)
     /// options.
@@ -1678,7 +1551,7 @@ impl NativeExtension for IntercomExtension {
         self.render_call_under(key, call, &cyrup_ext::RenderOptions::default())
     }
 
-    /// `renderCall(args, theme, context)` for both tools (`index.ts:2394-2411` and
+    /// `renderCall(args, theme, context)` (`index.ts:2394-2411` and
     /// `:2891-2914@v0.16.1`). ICOM-083 (`d5a8fd1` #153): `context.expanded` swaps the 96-char
     /// message preview for the full, raw outgoing body, so this is the hook the host re-invokes
     /// when Ctrl+O toggles. See [`crate::tools::render`] for what the seam still does not carry
@@ -1691,22 +1564,19 @@ impl NativeExtension for IntercomExtension {
     ) -> Option<serde_json::Value> {
         let text = match key {
             "intercom" => crate::tools::render::render_intercom_call(call, opts.expanded),
-            "contact_supervisor" => {
-                crate::tools::render::render_contact_supervisor_call(call, opts.expanded)
-            }
             _ => return None,
         };
         Some(serde_json::Value::String(text))
     }
 
-    /// `renderResult` for both tools, under the default options (collapsed, not partial) — the
-    /// options-free form of [`Self::render_result_under`].
+    /// `renderResult`, under the default options (collapsed, not partial) — the options-free form of
+    /// [`Self::render_result_under`].
     fn render_result(&self, key: &str, result: &serde_json::Value) -> Option<serde_json::Value> {
         self.render_result_under(key, result, &cyrup_ext::RenderOptions::default())
     }
 
-    /// `renderResult(result, { isPartial }, theme, context)` for both tools (`v0.14.0
-    /// index.ts:2723-2744` and `:2157-2175`). Upstream branches on `isPartial` and
+    /// `renderResult(result, { isPartial }, theme, context)` (`v0.14.0
+    /// index.ts:2723-2744` and, for `contact_supervisor`, `:2157-2175`). Upstream branches on `isPartial` and
     /// `context.expanded` — the latter is what collapses a `list` / `list-cwd` roster to one line
     /// (ICOM-066) — so this is the hook the host re-invokes when either moves.
     fn render_result_under(
@@ -1717,9 +1587,6 @@ impl NativeExtension for IntercomExtension {
     ) -> Option<serde_json::Value> {
         let text = match key {
             "intercom" => crate::tools::render::render_intercom_result(result, opts),
-            "contact_supervisor" => {
-                crate::tools::render::render_contact_supervisor_result(result, opts)
-            }
             _ => return None,
         };
         Some(serde_json::Value::String(text))
@@ -1813,20 +1680,18 @@ fn env_truthy(name: &str) -> bool {
     )
 }
 
-/// Whether intercom is "installed" for a plain (non-child) session: an explicit `CYRUP_INTERCOM`
-/// opt-in, or a `<intercomDir>/config.json` present. A subagent child with orchestrator metadata is
-/// always attached regardless (it needs `contact_supervisor`).
+/// Whether intercom is "installed": an explicit `CYRUP_INTERCOM` opt-in, or a
+/// `<intercomDir>/config.json` present. (pi's third case — a subagent child always attached, because
+/// it needed `contact_supervisor` — went with the subagents extension, docs/LEAN-FORK-PLAN.md
+/// step 4.)
 #[must_use]
 pub fn is_installed(intercom_dir: &std::path::Path) -> bool {
     env_truthy(INSTALL_ENV_VAR) || config_path(intercom_dir).exists()
 }
 
-/// The binary-side entry point `crates/cyrup/src/main.rs` calls at each of its three session-build
-/// sites (mirrors `subagent_extension_for_env`/`permission_extension_for_env`). Returns `None`
-/// (attach nothing) when intercom is disabled, or when this is a plain session that has not opted in.
-///
-/// A subagent child (child-orchestrator metadata present) always attaches so `contact_supervisor` is
-/// registered; a plain session attaches only when opted in (`is_installed`).
+/// The binary-side entry point `crates/cyrup/src/session_launch.rs` calls at each of its
+/// session-build sites. Returns `None` (attach nothing) when intercom is disabled by its config, or
+/// when the session has not opted in (`is_installed`).
 ///
 /// # Errors
 /// See [`IntercomExtension::new`] — propagates a hard error when the ask-timeout env var is set but
@@ -1835,43 +1700,21 @@ pub fn intercom_extension_for_env(
     agent_dir: PathBuf,
     cwd: PathBuf,
 ) -> Result<Option<Arc<dyn NativeExtension>>, String> {
-    Ok(intercom_extension_for_env_concrete(agent_dir, cwd)?
-        .map(|ext| ext as Arc<dyn NativeExtension>))
-}
-
-/// As [`intercom_extension_for_env`], but returns the CONCRETE [`IntercomExtension`] so the caller
-/// (`crates/cyrup/src/main.rs`) can extract its [`IntercomExtension::clarify_channel`]/
-/// [`IntercomExtension::delivery_channel`] seam channels and hand them to
-/// `SubagentsExtension::with_channels` (the port doc §8.4 item 1 / P5 handoff — CLOSING R-SA-037/
-/// 119/120/123/124/125) BEFORE attaching this same extension via `.with_native_extension(..)`. The
-/// two seam channels reference the one `SharedIntercomState` this extension owns, so handing them
-/// out and then attaching the extension wires BOTH ends to the same live broker client.
-///
-/// # Errors
-/// See [`IntercomExtension::new`].
-pub fn intercom_extension_for_env_concrete(
-    agent_dir: PathBuf,
-    cwd: PathBuf,
-) -> Result<Option<Arc<IntercomExtension>>, String> {
     let intercom_dir = intercom_dir_path(&agent_dir);
     // `v0.10.1 config.ts:153-155`: a malformed config is a hard error naming the path, not a silent
-    // `inboundTrigger: "never"`. This function already returns `Result<_, String>` for the
-    // analogous `ask_timeout_ms()` throw, so the precedent for propagating is in place.
+    // `inboundTrigger: "never"`. This function returns `Result<_, String>` for the analogous
+    // `ask_timeout_ms()` throw, so the precedent for propagating is in place — and the launcher
+    // turns that into a quarantined extension (`crates/cyrup/src/session_launch.rs::quarantine`).
     let config = load_config(&intercom_dir)?;
     if !config.enabled {
         return Ok(None);
     }
-    let metadata = read_child_orchestrator_metadata();
-    // Probed once, used twice: the attach gate immediately below, and the name-ownership decision
-    // in `init` (see [`IntercomExtension::installed`]).
     let installed = is_installed(&intercom_dir);
-    // The force-attach: a bridged child attaches even with no install so the supervisor surface
-    // stays reachable. Whether it also OWNS the `intercom` name is decided in `init`.
-    if metadata.is_none() && !installed {
+    if !installed {
         return Ok(None);
     }
     Ok(Some(Arc::new(
-        IntercomExtension::new(agent_dir, cwd, config, metadata)?.with_installed(installed),
+        IntercomExtension::new(agent_dir, cwd, config)?.with_installed(installed),
     )))
 }
 
@@ -1896,7 +1739,6 @@ mod tests {
             dir.path().to_path_buf(),
             dir.path().to_path_buf(),
             IntercomConfig::default(),
-            None,
         )
         .expect("a default config builds an extension");
         (dir, ext)
@@ -1921,7 +1763,6 @@ mod tests {
             &ext.state,
             crate::connect::ConnectParams {
                 agent_dir: dir.path().join("agent"),
-                metadata: None,
                 model: None,
             },
         );
@@ -2035,97 +1876,13 @@ mod tests {
         assert!(!host.has_entry_renderer("subagent_run"));
     }
 
-    /// The child-orchestrator metadata the `v0.10.1 index.ts:1505-1507` gate is keyed on. Built in
-    /// the test rather than read from the environment for the same reason
-    /// [`IntercomExtension::with_native_supervisor_channel`] exists: a test must not mutate
-    /// process-global env state.
-    fn child_metadata() -> ChildOrchestratorMetadata {
-        ChildOrchestratorMetadata {
-            orchestrator_target: "supervisor".to_string(),
-            orchestrator_session_id: None,
-            run_id: "run-xyz".to_string(),
-            agent: "researcher".to_string(),
-            index: "0".to_string(),
-            session_name: Some("subagent-chat-1".to_string()),
-        }
-    }
 
-    /// `init` one extension through a real `ExtensionHost` and report the names of the tools it
-    /// registered, sorted. `InitApi::into_parts` is `pub(crate)` to `cyrup-ext` and `InitApi`
-    /// exposes only `subscriptions()`, so the host's active tool set is the observable side of
-    /// `api.register_tool` from here — the same route
-    /// [`init_claims_the_intercom_message_entry_type`] takes to observe `register_entry_renderer`.
-    /// A fresh host per call because the extension id is fixed ([`EXTENSION_ID`]) and the two arms
-    /// must not share a registry.
-    async fn registered_tool_names(ext: IntercomExtension) -> Vec<String> {
-        let host = cyrup_ext::ExtensionHost::new(cyrup_ext::HostConfig::default());
-        host.load_native(Arc::new(ext))
-            .await
-            .expect("the native loads");
-        let mut names: Vec<String> = host
-            .active_tools(&[])
-            .expect("the active tool set materializes")
-            .iter()
-            .map(|t| cyrup_core::Tool::name(t.as_ref()).to_string())
-            .collect();
-        names.sort();
-        names
-    }
-
-    /// `v0.10.1 index.ts:1505-1507` — `if (childOrchestratorMetadata && !nativeSupervisorChannel
-    /// Available) { pi.registerTool(…) }`. BOTH arms are pinned here, and both are asserted against
-    /// the same fixture, because an absence assertion on its own passes just as well when the tool
-    /// failed to register for an unrelated reason. What the `true` arm guards is silent rather than
-    /// loud: a child handed the native channel AND the legacy broker-routed `contact_supervisor`
-    /// can request the same decision through two mechanisms while the parent polls only one of
-    /// them, which is a hang, not an error.
-    ///
-    /// Driven through [`IntercomExtension::with_native_supervisor_channel`] — the seam written for
-    /// exactly this and, until now, never called — so neither arm touches
-    /// `CYRUP_SUBAGENT_SUPERVISOR_CHANNEL_DIR` or any other process-global env state.
-    #[tokio::test]
-    async fn native_supervisor_channel_gates_the_legacy_contact_supervisor_tool() {
-        let dir = tempfile::tempdir().unwrap();
-        let child_extension = || {
-            IntercomExtension::new(
-                dir.path().to_path_buf(),
-                dir.path().to_path_buf(),
-                IntercomConfig::default(),
-                Some(child_metadata()),
-            )
-            .expect("a default config builds an extension")
-        };
-
-        // No native channel: the child gets the legacy broker-routed tool (`index.ts:1162-1163`).
-        let legacy =
-            registered_tool_names(child_extension().with_native_supervisor_channel(false)).await;
-        assert!(
-            legacy.iter().any(|n| n == "contact_supervisor"),
-            "a child WITHOUT the native channel must be handed the legacy tool: {legacy:?}"
-        );
-        assert!(
-            legacy.iter().any(|n| n == "intercom"),
-            "`intercom` is registered always: {legacy:?}"
-        );
-
-        // Native channel available: the SAME extension minus that one tool — `intercom` still
-        // registers, so the absence below is the gate firing and not a failed `init`.
-        let native =
-            registered_tool_names(child_extension().with_native_supervisor_channel(true)).await;
-        assert!(
-            !native.iter().any(|n| n == "contact_supervisor"),
-            "a child ON the native channel must NOT also get the broker-routed tool: {native:?}"
-        );
-        assert!(
-            native.iter().any(|n| n == "intercom"),
-            "`intercom` is registered always: {native:?}"
-        );
-    }
-
-    /// The two tool renderers are wired to the names the tools actually register under — a renderer
-    /// keyed on the wrong string is a silent no-op, since the host simply falls through.
+    /// The tool renderer is wired to the name the tool actually registers under — a renderer keyed on
+    /// the wrong string is a silent no-op, since the host simply falls through. (pi's second renderer,
+    /// keyed on `contact_supervisor`, went with the subagents extension, docs/LEAN-FORK-PLAN.md
+    /// step 4.)
     #[test]
-    fn both_tool_renderers_are_keyed_on_the_registered_tool_names() {
+    fn the_tool_renderer_is_keyed_on_the_registered_tool_name() {
         let (_dir, ext) = test_extension();
         let call = serde_json::json!({ "action": "send", "to": "reviewer", "message": "hi" });
         assert_eq!(
@@ -2134,10 +1891,6 @@ mod tests {
                 .as_str()
                 .unwrap(),
             "intercom send → reviewer\n  hi"
-        );
-        assert!(
-            ext.render_call("contact_supervisor", &serde_json::json!({}))
-                .is_some()
         );
         assert!(ext.render_call("not_our_tool", &call).is_none());
         // ICOM-083: the options-aware hook is the one the host re-invokes on Ctrl+O, and expanded
@@ -2178,7 +1931,6 @@ mod tests {
                 .unwrap(),
             "✓ Message sent to reviewer (0192f3c1)"
         );
-        assert!(ext.render_result("contact_supervisor", &result).is_some());
         assert!(ext.render_result("not_our_tool", &result).is_none());
     }
 
@@ -2226,21 +1978,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn extension_exposes_all_seam_channels() {
-        let dir = tempfile::tempdir().unwrap();
-        let ext = IntercomExtension::new(
-            dir.path().to_path_buf(),
-            dir.path().to_path_buf(),
-            IntercomConfig::default(),
-            None,
-        )
-        .unwrap();
-        // All three channels are constructed + reachable (handed to SubagentsExtension::with_channels).
-        let _c = ext.clarify_channel();
-        let _d = ext.delivery_channel();
-        let _s = ext.steer_channel();
-    }
 
     /// Regression proof: pre-fix, `HostEvent::TurnStart`/`TurnEnd` had no arm in `on_event` (the match
     /// fell through to `_ => HookOutcome::Noop`) and neither was subscribed, so `ReplyTracker::begin_turn`
@@ -2260,7 +1997,6 @@ mod tests {
             dir.path().to_path_buf(),
             dir.path().to_path_buf(),
             IntercomConfig::default(),
-            None,
         )
         .unwrap();
 
@@ -2381,7 +2117,6 @@ mod tests {
             dir.path().to_path_buf(),
             dir.path().to_path_buf(),
             IntercomConfig::default(),
-            None,
         );
         assert!(ext.unwrap().state().ask_timeout_ms > 0);
     }

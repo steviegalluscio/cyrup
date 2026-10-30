@@ -149,7 +149,27 @@ fn host_name() -> String {
             return name;
         }
     }
-    cyrup_ext_subagents::background::async_retention::machine_hostname()
+    // The portable ladder: the kernel's own answer on Linux, then the distro file, then the shell
+    // variables, then the literal `unknown-host` that keeps two unresolvable hosts agreeing with
+    // each other. Vendored here from the deleted `cyrup-ext-subagents` crate
+    // (docs/LEAN-FORK-PLAN.md step 4), whose lock-owner ladder stamped the same string.
+    for path in ["/proc/sys/kernel/hostname", "/etc/hostname"] {
+        if let Ok(raw) = std::fs::read_to_string(path) {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    for key in ["HOSTNAME", "COMPUTERNAME"] {
+        if let Ok(value) = std::env::var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+    "unknown-host".to_string()
 }
 
 /// `getConfigPath` (`config.ts:45-47`): `<intercomDir>/config.json`.

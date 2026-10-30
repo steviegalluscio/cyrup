@@ -12,7 +12,7 @@
     clippy::panic
 )]
 
-use cyrup_ext_subagents::background::reconcile::check_pid_liveness;
+use crate::primitives::check_pid_liveness;
 
 use super::*;
 
@@ -518,8 +518,8 @@ fn a_marker_names_the_pid_namespace_it_was_written_in() {
 /// the marker says.
 #[test]
 fn a_recycled_pid_is_not_read_as_alive_where_the_platform_gives_a_start_time() {
-    use cyrup_ext_subagents::background::reconcile::check_pid_liveness;
-    use cyrup_ext_subagents::background::session_lease::portable_start_identity;
+    use crate::primitives::check_pid_liveness;
+    use crate::primitives::session_lease::portable_start_identity;
 
     let pid = std::process::id();
     let now = portable_start_identity(pid).expect("the OS reports this process's start time");

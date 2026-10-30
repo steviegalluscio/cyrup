@@ -52,7 +52,6 @@ mod broker_extension_bus_miss_branches;
 mod broker_roundtrip;
 mod broker_runtime_claim;
 mod broker_startup_fail_fast;
-mod child_bridge_activation;
 // ICOM-067: the `cyrup-intercom-cli` scripting client (`cli.ts`), run as a subprocess against a
 // real broker and a real peer.
 mod cli_client;
@@ -68,7 +67,6 @@ mod handover_action;
 mod handover_command;
 // ICOM-065: the broker-side Herdr location join, against a fake Herdr socket.
 mod herdr_location;
-mod human_surface;
 mod injected_receipt_after_injection;
 // Written here, not drained: the live-session proofs for ICOM-035 / ICOM-062 / ICOM-068 — the
 // production `IntercomExtension` inside a real `AgentSession`, against a real broker.
@@ -91,7 +89,6 @@ mod registers_under_session_id;
 mod session_info_context_fields;
 // ICOM-064: an extension claims the session's intercom id over the bus.
 mod session_identity_claim;
-mod shared_human_lock;
 mod tool_actions;
 
 // §4 R5 layer 3 — the ambient-credential and feature-gate guards (an ambient `CYRUP_INTERCOM=1`

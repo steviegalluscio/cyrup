@@ -1,7 +1,6 @@
 # Intercom
 
-Intercom lets concurrent cyrup sessions and subagent children find each other and exchange messages,
-asks and replies. This page covers turning it on, what it puts on disk, and how you use it.
+Intercom lets concurrent cyrup sessions find each other and exchange messages, asks and replies. This page covers turning it on, what it puts on disk, and how you use it.
 
 Intercom is a [native extension](overview.md) and is off by default. **It is Unix only in this
 milestone** — macOS and Linux. There is no Windows transport.
@@ -13,9 +12,8 @@ registers with the broker, which gives each session an address other sessions ca
 a session can list who else is running, send a message, ask a question and wait for the answer, or
 reply to something it received.
 
-The two situations it exists for: several cyrup windows open on the same machine, working on
-different parts of the same problem; and a [subagent](subagents.md) child that needs to reach the
-session that spawned it.
+The situation it exists for: several cyrup windows — on one machine or across machines over SSH —
+working on different parts of the same problem, each able to address the others.
 
 cyrup starts the broker for you by re-executing its own binary. There is nothing separate to run.
 
@@ -27,9 +25,6 @@ CYRUP_INTERCOM=1 cyrup
 
 Or create `~/.cyrup/agent/intercom/config.json` and intercom arms itself without the variable. An
 empty `{}` is enough.
-
-A subagent child carrying orchestrator metadata attaches regardless, because that is how it reaches
-its parent.
 
 ## What it puts on disk
 
@@ -145,9 +140,6 @@ For `handover`,
 `message` is the optional next task, and `replyTo`, `supersedes`, `retryOf` and `attachments` are
 refused.
 
-A subagent child also gets `contact_supervisor` when it has orchestrator metadata and no native
-supervisor channel is available — a direct line back to the session that spawned it.
-
 Inbound messages render as their own entries in the transcript rather than as ordinary output, so
 you can tell what came from another session.
 
@@ -178,7 +170,7 @@ does not have to rediscover it.
 
 `/handover` on its own opens a picker. It lists the other sessions on this machine, most recently
 active first, with their directory, model, status and context use; context at 80% or more is
-highlighted. Your own session and subagent child sessions are hidden. "+ New session in a project
+highlighted. Your own session is hidden. "+ New session in a project
 path…" asks for a directory and opens a Herdr project pane there. "Fetch sessions from other
 machines" lists the cyrup sessions on your enabled saved Herdr machines; it only runs when you choose
 it, because each machine is reached over SSH and can take a few seconds. Each machine shows its
@@ -279,14 +271,6 @@ Then `/intercom-id` in one session gives you the snippet to paste into the other
 point either side can `ask` the other a question and get an answer without you carrying it across
 by hand. With `inboundTrigger` at `"replies"`, neither session starts a turn on an unsolicited
 message — you stay in control of when each one acts.
-
-## A naming overlap worth knowing
-
-When intercom is **not** attached, the [subagents](subagents.md) extension registers a tool of its
-own under the bare name `intercom`. So a session can have a tool called `intercom` without the
-intercom extension running at all, and the two are not the same tool. If a tool named `intercom`
-behaves unlike anything on this page, check whether intercom is actually on — `/intercom` does not
-exist unless it is.
 
 ## Environment variables
 

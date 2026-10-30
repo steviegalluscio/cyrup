@@ -300,7 +300,7 @@ impl NativeExtension for PermissionSystemExtension {
                 // `publish_parent_session_anchor` — a CHILD never published and must not clear the
                 // anchor its own descendants still need.
                 if self.install_watcher {
-                    cyrup_ext_subagents::clear_parent_session_anchor();
+                    crate::primitives::clear_parent_session_anchor();
                 }
                 HookOutcome::Noop
             }
