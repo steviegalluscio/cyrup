@@ -165,13 +165,23 @@ gated and still attach normally.
 `project.*` tool verbs are gone — they were a module of the deleted crate and actions of the single
 `subagent` tool. `cyrup-herdr` survives as the client intercom uses. Rebuilding the sidebar as a WASM
 guest stays the optional follow-up below.
-- **Tests.** `cyrup-it`'s `subagents` target (and its `build.rs` fixture entries) plus the
+- **Tests.** `cyrup-it`'s `subagents` targets (and its `build.rs` fixture entries) plus the
 subagent-only `verify_redaction`, `child_bridge_activation`, `human_surface`, `shared_human_lock` and
 `permission/forwarding_spawn_env` targets/modules are deleted; `intercom/broker_roundtrip` is kept and
 simplified. The suite went 11 binaries → 9, ~862 → ~700 test functions. Kept and passing: `intercom`
 170, `permission` 49, `bin` 90, `misc` 4, `session_svc` 60, `ext` 80 (the WASM host is unaffected,
 per D6). Deleted with nothing to replace them: `cyrup-flux/tests/flux_002_subagent_fallback.rs` and
-the two session-svc child-exemption tests.
+the two session-svc child-exemption tests. Under the documented gate,
+`cargo nextest run -p cyrup-it --features it` is **535/535**, and the workspace's inline suites are
+green. Plain `cargo test` cannot substitute for that gate here, for two reasons worth recording
+because both cost time to diagnose: the `mcp` target's `http_oauth` assertions read
+process-global OAuth callback-server state — the test file says so itself — so any earlier test in
+the same binary turns all nine red; and a shell with `ulimit -n 1024` produces ~350 failures whose
+only cause is `TooManyOpenFiles` (which also surfaces as reqwest's misleading "No CA certificates
+were loaded"). Two gate failures found on the way and fixed: intercom's cross-machine routing test
+pinned the literal `"herdr"` while `herdr_bin_from` reads `HERDR_BIN_PATH` at call time (so it fails
+in any herdr pane), and the three pico `compile_fail` snapshot suites needed the toolchain refresh
+their own harness documents for stable 1.99.1.
 - **Docs.** `docs/guide/extensions/subagents.md` deleted with its SUMMARY entry; the `subagents`
 settings block, its two troubleshooting entries, README's feature/herdr/V8/workflowScript sections,
 the crate table, the `cyrup-it` run recipe and the upstream-port table row are updated. The
