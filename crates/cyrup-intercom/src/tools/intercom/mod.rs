@@ -1262,13 +1262,26 @@ mod tests {
             result.details.as_ref().map(|d| d["crossMachine"].clone()),
             Some(serde_json::json!(true))
         );
+        // The two discovery calls name the herdr binary exactly the way production resolves it:
+        // `HERDR_BIN_PATH` if set, else the bare name (`cross_machine::herdr_bin_from`, upstream's
+        // `process.env.HERDR_BIN_PATH ?? "herdr"`). A unit test cannot pin the literal `"herdr"`
+        // here, because the code reads the environment at call time on purpose and a test process
+        // started inside a herdr pane carries `HERDR_BIN_PATH=/abs/path/herdr`. What is pinned is
+        // the routing decision ICOM-074 is about: two discovery calls against one binary, then
+        // `ssh`, and nothing sent to the local broker.
+        let herdr = crate::cross_machine::herdr_bin_from(|key| std::env::var(key).ok());
+        assert!(
+            herdr.ends_with("herdr"),
+            "the resolved command is still the herdr CLI, however the operator's shell \
+             spells it: {herdr}"
+        );
         assert_eq!(
             relay
                 .seen
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .as_slice(),
-            ["herdr".to_string(), "herdr".to_string(), "ssh".to_string()],
+            [herdr.clone(), herdr, "ssh".to_string()],
             "discovery then ssh — the relay really ran"
         );
     }
